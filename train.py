@@ -9,8 +9,8 @@ from torch.utils.data import DataLoader
 
 from configs.config import Config
 from datasets.kla_dataset import get_train_val_datasets
-from models.restormer_baseline import RestormerBaseline
-from losses.hybrid_loss import HybridLoss
+from models.airnet import AIRNet
+from losses.hybrid_loss import AIRNetHybridLoss
 from utils import (
     ModelEMA,
     calculate_psnr,
@@ -56,8 +56,8 @@ def train_epoch(
         gt_batch = gt_batch.to(device)
 
         with torch.cuda.amp.autocast(enabled=(device.type == 'cuda')):
-            pred_batch = model(lr_batch)
-            loss = criterion(pred_batch, gt_batch)
+            out_dict = model(lr_batch)
+            loss = criterion(out_dict, gt_batch)
             # Scale loss for gradient accumulation
             loss = loss / grad_accum_steps
 
@@ -92,11 +92,12 @@ def evaluate(
             gt_batch = gt_batch.to(device)
 
             with torch.cuda.amp.autocast(enabled=(device.type == 'cuda')):
-                pred_batch = model(lr_batch)
-                loss = criterion(pred_batch, gt_batch)
+                out_dict = model(lr_batch)
+                loss = criterion(out_dict, gt_batch)
 
             running_loss += loss.item()
-            pred_clamped = torch.clamp(pred_batch, 0.0, 1.0)
+            pred_img = out_dict["restored"] if isinstance(out_dict, dict) else out_dict
+            pred_clamped = torch.clamp(pred_img, 0.0, 1.0)
 
             psnr_val = calculate_psnr(pred_clamped, gt_batch, data_range=1.0)
             ssim_val = calculate_ssim(pred_clamped, gt_batch, data_range=1.0)
@@ -116,7 +117,7 @@ def main():
     set_seed(config.seed)
 
     print("====================================================")
-    print("STAGE-1 RESTORMER BASELINE TRAINING PIPELINE")
+    print("KLA AIR-NET V1 SEMICONDUCTOR RESTORATION TRAINING PIPELINE")
     print("====================================================")
 
     # 1. Generate Dataset Sanity Report
@@ -151,11 +152,11 @@ def main():
         pin_memory=True
     )
 
-    # 4. Initialize Model, EMA, Device
+    # 4. Initialize AIR-Net v1 Model, EMA, Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Execution Device: {device}")
 
-    model = RestormerBaseline(
+    model = AIRNet(
         in_channels=config.in_channels,
         out_channels=config.out_channels,
         dim=config.dim,
@@ -174,9 +175,11 @@ def main():
     generate_experiment_info(config)
 
     # 6. Loss, Optimizer, Scheduler, AMP Scaler, Logger
-    criterion = HybridLoss(
-        l1_weight=config.loss_l1_weight,
-        ssim_weight=config.loss_ssim_weight,
+    criterion = AIRNetHybridLoss(
+        l1_weight=0.60,
+        ssim_weight=0.25,
+        edge_weight=0.15,
+        use_lpips=False,
         data_range=1.0
     ).to(device)
 
@@ -204,7 +207,7 @@ def main():
     epoch_times = []
     start_total_time = time.time()
 
-    print("\nStarting 20 Epoch Training Loop...")
+    print(f"\nStarting {config.epochs} Epoch Training Loop...")
     for epoch in range(1, config.epochs + 1):
         t0 = time.time()
 
@@ -282,9 +285,9 @@ def main():
             best_ssim = ema_ssim
             best_epoch = epoch
 
-            # Save EMA Best Model
+            # Save AIR-Net EMA Best Model and standard checkpoints
+            torch.save(ema.state_dict(), os.path.join(config.checkpoint_dir, "airnet_ema_best_model.pth"))
             torch.save(ema.state_dict(), os.path.join(config.checkpoint_dir, "ema_best_model.pth"))
-            # Save Standard Best Model
             torch.save(model.state_dict(), os.path.join(config.checkpoint_dir, "best_model.pth"))
 
             # Save Best Metrics JSON
@@ -292,10 +295,10 @@ def main():
                 "best_epoch": best_epoch,
                 "best_psnr": round(best_psnr, 4),
                 "best_ssim": round(best_ssim, 4),
-                "best_model": "ema_best_model.pth"
+                "best_model": "airnet_ema_best_model.pth"
             }, config.best_metrics_file)
 
-            print(f"  --> [NEW BEST] Saved ema_best_model.pth (PSNR: {best_psnr:.4f} dB, SSIM: {best_ssim:.4f})")
+            print(f"  --> [NEW BEST] Saved airnet_ema_best_model.pth (PSNR: {best_psnr:.4f} dB, SSIM: {best_ssim:.4f})")
 
     total_training_time = time.time() - start_total_time
     avg_epoch_time = sum(epoch_times) / len(epoch_times)
@@ -306,7 +309,7 @@ def main():
     # 8. Generate Final Post-Training Report
     final_report = (
         "====================================================\n"
-        "KLA SEMICONDUCTOR RESTORATION - STAGE-1 FINAL REPORT\n"
+        "KLA SEMICONDUCTOR AIR-NET V1 - FINAL REPORT\n"
         "====================================================\n"
         f"Total Training Epochs:    {config.epochs}\n"
         f"Total Training Time:      {total_training_time / 60.0:.2f} minutes ({total_training_time:.1f} s)\n"
@@ -327,7 +330,7 @@ def main():
     with open(config.final_report_file, "w") as f:
         f.write(final_report)
 
-    print("\nTraining completed successfully!")
+    print("\nAIR-Net v1 training completed successfully!")
     print(final_report)
 
 if __name__ == "__main__":

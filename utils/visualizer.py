@@ -37,7 +37,8 @@ def save_visualizations_and_predictions(
             gt_batch = gt_tensor.unsqueeze(0).to(device)  # (1, 1, 256, 256)
 
             # Model prediction
-            pred_batch = model(lr_batch)  # (1, 1, 256, 256)
+            out = model(lr_batch)
+            pred_batch = out["restored"] if isinstance(out, dict) else out
             pred_batch_clamped = torch.clamp(pred_batch, 0.0, 1.0)
 
             # Bicubic reference
