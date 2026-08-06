@@ -1,0 +1,18 @@
+====================================================
+KLA SEMICONDUCTOR RESTORATION - DATASET SANITY REPORT
+====================================================
+Total Training Samples Analyzed: 2880
+Corrupted/NaN/Inf Files Found: 0
+
+--- NoisyLR Statistics (128x128 float32) ---
+Min Value:   -0.278563 (Avg sample min: -0.006998)
+Max Value:   2.158005 (Avg sample max: 1.392462)
+Mean Value:  0.432280
+Std Value:   0.205794
+
+--- Ground Truth Statistics (256x256 float32) ---
+Min Value:   0.000000
+Max Value:   1.000000
+Mean Value:  0.432275
+Std Value:   0.187668
+====================================================

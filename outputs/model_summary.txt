@@ -1,0 +1,40 @@
+====================================================
+KLA SEMICONDUCTOR RESTORATION - AIR-NET V1 SUMMARY REPORT
+====================================================
+Architecture:            AIR-Net v1 (Adaptive Image Restoration Network)
+Input Shape:             (1, 1, 128, 128)
+Output Shapes:
+   - restored  : (1, 1, 256, 256)
+   - edge      : (1, 1, 256, 256)
+   - noise     : (1,)
+   - blur      : (1,)
+   - texture   : (1,)
+----------------------------------------------------
+MODULE PARAMETER BREAKDOWN:
+   - degradation_analyzer     : 5,379 params (0.005 M)
+   - input_conv               : 288 params (0.000 M)
+   - encoder_level1           : 29,558 params (0.030 M)
+   - down1_2                  : 18,432 params (0.018 M)
+   - encoder_level2           : 108,140 params (0.108 M)
+   - down2_3                  : 73,728 params (0.074 M)
+   - encoder_level3           : 824,752 params (0.825 M)
+   - down3_latent             : 221,184 params (0.221 M)
+   - adaptive_modulation      : 1,536 params (0.002 M)
+   - latent                   : 3,650,832 params (3.651 M)
+   - up_latent_dec1           : 884,736 params (0.885 M)
+   - reduce_dec1              : 32,768 params (0.033 M)
+   - decoder_level1           : 824,752 params (0.825 M)
+   - up_dec1_dec2             : 294,912 params (0.295 M)
+   - reduce_dec2              : 8,192 params (0.008 M)
+   - decoder_level2           : 108,140 params (0.108 M)
+   - up_dec2_dec3             : 73,728 params (0.074 M)
+   - reduce_dec3              : 2,048 params (0.002 M)
+   - decoder_level3           : 29,558 params (0.030 M)
+   - restored_pre_conv        : 9,216 params (0.009 M)
+   - restored_pixel_shuffle   : 36,864 params (0.037 M)
+   - restored_post_conv       : 288 params (0.000 M)
+   - edge_head                : 46,368 params (0.046 M)
+----------------------------------------------------
+Total Parameters:        7,285,399 (7.29 M)
+Trainable Parameters:    7,285,399
+====================================================

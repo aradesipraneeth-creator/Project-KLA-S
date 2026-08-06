@@ -1,0 +1,7 @@
+====================================================
+KLA SEMICONDUCTOR RESTORATION - BICUBIC VALIDATION BASELINE
+====================================================
+Validation Set Size:  320 samples
+Bicubic Average PSNR: 22.9770 dB
+Bicubic Average SSIM: 0.5134
+====================================================

@@ -1,0 +1,54 @@
+{
+    "timestamp": "2026-08-04 10:26:53",
+    "experiment_stage": "Stage-1 Baseline (Restormer + 2x PixelShuffle)",
+    "seed": 42,
+    "dataset_split": {
+        "total_samples": 3200,
+        "train_samples": 2880,
+        "val_samples": 320
+    },
+    "model_config": {
+        "in_channels": 1,
+        "out_channels": 1,
+        "dim": 32,
+        "channels": [
+            32,
+            64,
+            128,
+            192
+        ],
+        "heads": [
+            1,
+            2,
+            4,
+            6
+        ],
+        "enc_blocks": [
+            2,
+            2,
+            4
+        ],
+        "latent_blocks": 8,
+        "dec_blocks": [
+            4,
+            2,
+            2
+        ],
+        "ffn_expansion_factor": 2.66
+    },
+    "training_config": {
+        "batch_size": 4,
+        "grad_accum_steps": 8,
+        "effective_batch_size": 32,
+        "epochs": 20,
+        "learning_rate": 0.0002,
+        "weight_decay": 0.0001,
+        "min_lr": 1e-06,
+        "max_grad_norm": 1.0,
+        "ema_decay": 0.999,
+        "loss_weights": {
+            "L1": 0.8,
+            "SSIM": 0.2
+        }
+    }
+}

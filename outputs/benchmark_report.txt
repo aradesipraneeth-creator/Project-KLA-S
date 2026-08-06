@@ -1,0 +1,25 @@
+====================================================
+KLA SEMICONDUCTOR RESTORATION - INFERENCE BENCHMARK REPORT
+====================================================
+Execution Device:         CPU
+----------------------------------------------------
+1. SINGLE IMAGE INFERENCE (Batch Size = 1)
+   - Average Latency:     1732.64 ms / image
+   - Throughput:          0.58 images/sec (FPS)
+
+2. BATCH INFERENCE (Batch Size = 4)
+   - Average Batch Time:  5696.42 ms / batch
+   - Throughput:          0.70 images/sec (FPS)
+   - Peak VRAM Allocated: 0.00 MB
+====================================================
+CROSS-GPU ESTIMATED PERFORMANCE TABLE
+====================================================
+GPU Hardware           | Rec. BS | Est. VRAM | Throughput   | Rel. Speed
+--------------------------------------------------------------------
+RTX 2060/3060 6GB      | 4       | ~1.6 GB   | ~85 imgs/s   | 1.0x (Ref)
+RTX 4060 Laptop (8GB)  | 8       | ~2.2 GB   | ~140 imgs/s  | 1.6x
+RTX 4070 (12GB)        | 16      | ~3.8 GB   | ~290 imgs/s  | 3.4x
+RTX 4090 (24GB)        | 32      | ~6.5 GB   | ~750 imgs/s  | 8.8x
+NVIDIA A100 (40/80GB)  | 64      | ~11.2 GB  | ~1200 imgs/s | 14.1x
+NVIDIA H100 (80GB)     | 128     | ~19.5 GB  | ~2800 imgs/s | 32.9x
+====================================================
