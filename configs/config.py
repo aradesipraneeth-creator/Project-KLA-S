@@ -75,6 +75,8 @@ class Config:
     EARLY_STOP_PATIENCE: int = 20
     EXPORT_ONNX: bool = False
     USE_TORCH_COMPILE: bool = False
+    COPY_DATASET_TO_LOCAL: bool = True
+    USE_TTA: bool = False
 
     def __post_init__(self):
         root = os.path.abspath(self.project_root)

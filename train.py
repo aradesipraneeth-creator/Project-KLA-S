@@ -3,11 +3,14 @@ import sys
 import time
 import random
 import json
+import shutil
 from typing import Tuple, Dict, Any, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
+
 try:
     from tqdm import tqdm
 except ImportError:
@@ -82,6 +85,52 @@ def get_autocast_context(device: torch.device):
     else:
         return torch.cuda.amp.autocast(enabled=enabled)
 
+def stage_dataset_to_fast_local_storage(config: Config):
+    """
+    Optional Dataset Staging for Google Colab / Remote Cloud Training.
+    Copies GT and NoisyLR once to fast local SSD storage (/content/kla_dataset or /tmp/kla_dataset)
+    to maximize DataLoader GPU throughput while keeping all checkpoints & outputs on Google Drive.
+    """
+    if not getattr(config, 'COPY_DATASET_TO_LOCAL', True):
+        return
+
+    # Determine local staging root
+    if os.path.exists("/content"):
+        local_root = "/content/kla_dataset"
+    else:
+        local_root = os.path.join(os.path.expanduser("~"), ".cache", "kla_dataset")
+
+    local_lr_dir = os.path.join(local_root, "train", "NoisyLR")
+    local_gt_dir = os.path.join(local_root, "train", "GT")
+
+    source_lr_dir = config.train_lr_dir
+    source_gt_dir = config.train_gt_dir
+
+    if os.path.exists(source_lr_dir) and os.path.exists(source_gt_dir):
+        if not (os.path.exists(local_lr_dir) and os.path.exists(local_gt_dir)):
+            print(f"  ✓ Copying dataset to fast local storage ({local_root})...")
+            try:
+                os.makedirs(local_lr_dir, exist_ok=True)
+                os.makedirs(local_gt_dir, exist_ok=True)
+
+                lr_files = [f for f in os.listdir(source_lr_dir) if f.endswith(".npy")]
+                for f in lr_files:
+                    shutil.copy2(os.path.join(source_lr_dir, f), os.path.join(local_lr_dir, f))
+
+                gt_files = [f for f in os.listdir(source_gt_dir) if f.endswith(".npy")]
+                for f in gt_files:
+                    shutil.copy2(os.path.join(source_gt_dir, f), os.path.join(local_gt_dir, f))
+
+                print(f"  ✓ Successfully staged {len(lr_files)} samples to fast local SSD storage.")
+            except Exception as e:
+                print(f"  ⚠️ Fast local staging notice: {e}. Falling back to original dataset paths.")
+                return
+
+        # Update dataset paths to point to fast local copy
+        config.train_lr_dir = local_lr_dir
+        config.train_gt_dir = local_gt_dir
+        print(f"  ✓ Fast local dataset staging active: '{local_root}'. Training from SSD copy.")
+
 def cleanup_temporary_checkpoints(checkpoint_dir: str):
     """Clean up any temporary .tmp checkpoint files while keeping standard models."""
     if os.path.exists(checkpoint_dir):
@@ -154,13 +203,39 @@ def train_epoch(
 
     return running_loss / len(dataloader)
 
+def apply_8way_tta_inference(model: nn.Module, lr_batch: torch.Tensor, device: torch.device) -> torch.Tensor:
+    """
+    Optional 8-way Test-Time Augmentation (TTA) during evaluation.
+    Applies 4 rotations x 2 flips, predicts, inverses spatial transforms, and averages restored images.
+    """
+    preds = []
+
+    for rot_k in range(4):
+        for flip in [False, True]:
+            x = torch.rot90(lr_batch, rot_k, dims=[2, 3])
+            if flip:
+                x = torch.flip(x, dims=[3])
+
+            with get_autocast_context(device):
+                out = model(x)
+                pred_img = out["restored"] if isinstance(out, dict) else out
+
+            if flip:
+                pred_img = torch.flip(pred_img, dims=[3])
+            pred_img = torch.rot90(pred_img, -rot_k, dims=[2, 3])
+
+            preds.append(pred_img)
+
+    return torch.stack(preds, dim=0).mean(dim=0)
+
 def evaluate(
     model: nn.Module,
     dataloader: DataLoader,
     criterion: nn.Module,
-    device: torch.device
+    device: torch.device,
+    use_tta: bool = False
 ) -> Tuple[float, float, float]:
-    """Evaluates model on validation set and computes Loss, PSNR, and SSIM."""
+    """Evaluates EMA model on validation set with optional 8-way TTA and computes Loss, PSNR, and SSIM."""
     model.eval()
     running_loss = 0.0
     psnr_list = []
@@ -171,12 +246,18 @@ def evaluate(
             lr_batch = lr_batch.to(device)
             gt_batch = gt_batch.to(device)
 
-            with get_autocast_context(device):
-                out_dict = model(lr_batch)
-                loss = criterion(out_dict, gt_batch)
+            if use_tta:
+                pred_img = apply_8way_tta_inference(model, lr_batch, device)
+                with get_autocast_context(device):
+                    out_dict = {"restored": pred_img}
+                    loss = criterion(out_dict, gt_batch)
+            else:
+                with get_autocast_context(device):
+                    out_dict = model(lr_batch)
+                    loss = criterion(out_dict, gt_batch)
+                pred_img = out_dict["restored"] if isinstance(out_dict, dict) else out_dict
 
             running_loss += loss.item()
-            pred_img = out_dict["restored"] if isinstance(out_dict, dict) else out_dict
             pred_clamped = torch.clamp(pred_img, 0.0, 1.0)
 
             psnr_val = calculate_psnr(pred_clamped, gt_batch, data_range=1.0)
@@ -233,6 +314,9 @@ def main():
     print("KLA AIR-NET V1 SEMICONDUCTOR RESTORATION TRAINING PIPELINE")
     print("====================================================")
 
+    # Optional Dataset Staging to fast local SSD storage
+    stage_dataset_to_fast_local_storage(config)
+
     # Device Selection & Hardware Diagnostics
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Execution Device:              {device}")
@@ -252,6 +336,7 @@ def main():
     print(f"Gradient Accumulation Steps:   {config.grad_accum_steps} (Effective Batch Size = {effective_batch_size})")
     print(f"Mixed Precision Status:        {'Enabled (AMP)' if device.type == 'cuda' else 'Disabled (FP32)'}")
     print(f"EMA Status:                    Enabled (decay={config.ema_decay})")
+    print(f"Evaluation TTA Status:         {'Enabled (8-way TTA)' if config.USE_TTA else 'Disabled'}")
     print("----------------------------------------------------")
 
     # Profile Startup Phase Timings
@@ -478,13 +563,14 @@ def main():
         current_lr = optimizer.param_groups[0]['lr']
         scheduler.step()
 
-        # Validation Frequency Control (VALIDATE_EVERY)
+        # Consistent Validation Evaluation using EMA Model
         if epoch % config.VALIDATE_EVERY == 0 or epoch == config.epochs:
             val_loss, ema_psnr, ema_ssim = evaluate(
                 model=ema.ema_model,
                 dataloader=val_loader,
                 criterion=criterion,
-                device=device
+                device=device,
+                use_tta=config.USE_TTA
             )
 
             # GPU Memory Cleanup after validation
@@ -495,7 +581,12 @@ def main():
         epoch_dur = t1 - t0
         epoch_times.append(epoch_dur)
 
-        # GPU Memory Metrics Recording
+        # DataLoader Throughput & GPU Utilization Summaries
+        total_train_images = len(train_dataset)
+        total_train_batches = len(train_loader)
+        imgs_per_sec = total_train_images / epoch_dur
+        batches_per_sec = total_train_batches / epoch_dur
+
         if device.type == 'cuda':
             gpu_alloc = torch.cuda.memory_allocated() / (1024 ** 2)
             gpu_res = torch.cuda.memory_reserved() / (1024 ** 2)
@@ -531,7 +622,8 @@ def main():
             ssim=ema_ssim,
             lr=current_lr
         )
-        print(f"        └─ Time: {epoch_dur:.2f}s | Avg/Epoch: {avg_epoch_time:.2f}s | ETA: {eta_str} | Best PSNR: {max(best_psnr, ema_psnr):.4f} dB | Best SSIM: {max(best_ssim, ema_ssim):.4f} | GPU Mem: {gpu_alloc:.0f}MB")
+        print(f"        ├─ Throughput: {imgs_per_sec:.1f} imgs/s ({batches_per_sec:.2f} batch/s) | Time: {epoch_dur:.2f}s | ETA: {eta_str}")
+        print(f"        └─ Best PSNR: {max(best_psnr, ema_psnr):.4f} dB | Best SSIM: {max(best_ssim, ema_ssim):.4f} | GPU Mem: Alloc {gpu_alloc:.0f}MB, Res {gpu_res:.0f}MB, Peak {gpu_max:.0f}MB")
 
         # Configurable Visualizations & Prediction Dumps
         if epoch % config.VISUALIZATION_INTERVAL == 0 or epoch == config.epochs:
