@@ -64,6 +64,12 @@ class Config:
     # Fixed 5 validation sample indices for tracking
     fixed_val_indices: List[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])
 
+    # --- Optimization & Pipeline Control Flags ---
+    SKIP_PRECOMPUTATION: bool = True
+    AUTO_RESUME: bool = True
+    RUN_BENCHMARK_AFTER_TRAINING: bool = True
+    VISUALIZATION_INTERVAL: int = 5
+
     def __post_init__(self):
         root = os.path.abspath(self.project_root)
         script_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

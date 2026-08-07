@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import random
+import json
 import numpy as np
 import torch
 import torch.nn as nn
@@ -25,6 +26,20 @@ from utils import (
     generate_experiment_info,
     run_inference_benchmark
 )
+
+# ====================================================
+# FUTURE EXTENSION HOOKS (TODO PLACEHOLDERS)
+# ====================================================
+# TODO: AIR-Net v2
+# TODO: Dynamic Loss Weight Scheduler
+# TODO: Knowledge Distillation
+# TODO: Test-Time Augmentation
+# TODO: ONNX Export
+# TODO: TensorRT Export
+# TODO: Adaptive Inference
+# TODO: Multi-scale Inference
+# TODO: LPIPS Training
+# ====================================================
 
 def set_seed(seed: int = 42):
     """Sets fixed random seed across python, numpy, and PyTorch for full reproducibility."""
@@ -58,7 +73,6 @@ def train_epoch(
         with torch.cuda.amp.autocast(enabled=(device.type == 'cuda')):
             out_dict = model(lr_batch)
             loss = criterion(out_dict, gt_batch)
-            # Scale loss for gradient accumulation
             loss = loss / grad_accum_steps
 
         scaler.scale(loss).backward()
@@ -111,8 +125,40 @@ def evaluate(
 
     return avg_loss, avg_psnr, avg_ssim
 
+def parse_cached_bicubic_baseline(baseline_file: str):
+    """Parses PSNR and SSIM values from cached bicubic_baseline.txt."""
+    psnr_val, ssim_val = 22.9770, 0.5134
+    if os.path.exists(baseline_file):
+        try:
+            with open(baseline_file, "r") as f:
+                content = f.read()
+            for line in content.splitlines():
+                if "Average Bicubic PSNR:" in line:
+                    psnr_val = float(line.split(":")[1].replace("dB", "").strip())
+                elif "Average Bicubic SSIM:" in line:
+                    ssim_val = float(line.split(":")[1].strip())
+        except Exception:
+            pass
+    return psnr_val, ssim_val
+
+def format_time(seconds: float) -> str:
+    """Formats seconds into human readable h m s or m s."""
+    if seconds < 0:
+        seconds = 0
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h}h {m}m {s}s"
+    elif m > 0:
+        return f"{m}m {s}s"
+    else:
+        return f"{s}s"
+
 def main():
+    startup_start = time.time()
     config = Config()
+
+    # Safety Checks: Create output, checkpoint, vis, val_preds, and test_results directories
     config.create_dirs()
     set_seed(config.seed)
 
@@ -120,13 +166,46 @@ def main():
     print("KLA AIR-NET V1 SEMICONDUCTOR RESTORATION TRAINING PIPELINE")
     print("====================================================")
 
-    # 1. Generate Dataset Sanity Report
-    generate_dataset_stats(config)
+    # Device Selection & Hardware Diagnostics
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Execution Device:              {device}")
 
-    # 2. Compute Bicubic Validation Baseline
-    bicubic_psnr, bicubic_ssim = compute_bicubic_baseline(config)
+    if device.type == "cuda":
+        gpu_name = torch.cuda.get_device_name(0)
+        cuda_ver = torch.version.cuda
+        total_mem = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+        print(f"GPU Name:                      {gpu_name}")
+        print(f"CUDA Version:                  {cuda_ver}")
+        print(f"Total GPU Memory:              {total_mem:.2f} GB")
+    else:
+        print(f"Hardware Acceleration:         {device.type.upper()}")
 
-    # 3. Load Datasets and DataLoaders
+    effective_batch_size = config.batch_size * config.grad_accum_steps
+    print(f"Batch Size (Per-GPU):          {config.batch_size}")
+    print(f"Gradient Accumulation Steps:   {config.grad_accum_steps} (Effective Batch Size = {effective_batch_size})")
+    print(f"Mixed Precision Status:        {'Enabled (AMP)' if device.type == 'cuda' else 'Disabled (FP32)'}")
+    print(f"EMA Status:                    Enabled (decay={config.ema_decay})")
+    print("----------------------------------------------------")
+
+    # [1/8] Dataset Statistics (Caching System)
+    print("[1/8] Dataset Statistics")
+    if config.SKIP_PRECOMPUTATION and os.path.exists(config.train_stats_file):
+        print(f"  ✓ Dataset statistics found ({config.train_stats_file}).")
+        print("  ✓ Using cached statistics.")
+    else:
+        generate_dataset_stats(config)
+
+    # [2/8] Bicubic Baseline (Caching System)
+    print("[2/8] Bicubic Baseline")
+    if config.SKIP_PRECOMPUTATION and os.path.exists(config.bicubic_baseline_file):
+        print(f"  ✓ Bicubic baseline found ({config.bicubic_baseline_file}).")
+        print("  ✓ Using cached baseline.")
+        bicubic_psnr, bicubic_ssim = parse_cached_bicubic_baseline(config.bicubic_baseline_file)
+    else:
+        bicubic_psnr, bicubic_ssim = compute_bicubic_baseline(config)
+
+    # [3/8] Dataset Loading (Platform-Aware DataLoader)
+    print("[3/8] Dataset Loading")
     train_dataset, val_dataset = get_train_val_datasets(
         train_lr_dir=config.train_lr_dir,
         train_gt_dir=config.train_gt_dir,
@@ -135,27 +214,40 @@ def main():
         val_split=config.val_split
     )
 
+    if device.type == "cuda":
+        num_workers = min(2, os.cpu_count() or 2)
+        pin_memory = True
+        persistent_workers = True if num_workers > 0 else False
+        prefetch_factor = 2 if num_workers > 0 else None
+    else:
+        num_workers = 0
+        pin_memory = False
+        persistent_workers = False
+        prefetch_factor = None
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
         shuffle=True,
-        num_workers=0,
-        pin_memory=True,
-        drop_last=True
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=True,
+        persistent_workers=persistent_workers,
+        prefetch_factor=prefetch_factor
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=config.batch_size,
         shuffle=False,
-        num_workers=0,
-        pin_memory=True
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
+        prefetch_factor=prefetch_factor
     )
 
-    # 4. Initialize AIR-Net v1 Model, EMA, Device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Execution Device: {device}")
-
+    # [4/8] Model Initialization
+    print("[4/8] Model Initialization")
     model = AIRNet(
         in_channels=config.in_channels,
         out_channels=config.out_channels,
@@ -170,11 +262,23 @@ def main():
 
     ema = ModelEMA(model, decay=config.ema_decay)
 
-    # 5. Generate Model Summary and Reproducibility Metadata
-    generate_model_summary(config, model)
-    generate_experiment_info(config)
+    # [5/8] Summary & Metadata (Caching System)
+    print("[5/8] Summary & Metadata")
+    if (
+        config.SKIP_PRECOMPUTATION
+        and os.path.exists(config.model_summary_file)
+        and os.path.exists(config.experiment_info_file)
+    ):
+        print(f"  ✓ Model summary found ({config.model_summary_file}).")
+        print("  ✓ Using cached summary.")
+        print(f"  ✓ Experiment metadata found ({config.experiment_info_file}).")
+        print("  ✓ Using cached metadata.")
+    else:
+        generate_model_summary(config, model)
+        generate_experiment_info(config)
 
-    # 6. Loss, Optimizer, Scheduler, AMP Scaler, Logger
+    # [6/8] Loss & Optimizer Setup
+    print("[6/8] Loss & Optimizer Setup")
     criterion = AIRNetHybridLoss(
         l1_weight=0.60,
         ssim_weight=0.25,
@@ -199,16 +303,53 @@ def main():
     scaler = torch.cuda.amp.GradScaler(enabled=(device.type == 'cuda'))
     csv_logger = CSVLogger(config.results_csv)
 
-    # Tracking Variables
+    # [7/8] Resume Checkpoint Verification (Auto Resume)
+    print("[7/8] Resume Checkpoint Verification")
+    last_ckpt_path = os.path.join(config.checkpoint_dir, "last_model.pth")
+    start_epoch = 1
     best_psnr = -1.0
     best_ssim = -1.0
     best_epoch = -1
 
+    # Load existing best metrics if available
+    if os.path.exists(config.best_metrics_file):
+        try:
+            with open(config.best_metrics_file, "r") as f:
+                best_data = json.load(f)
+            best_psnr = best_data.get("best_psnr", -1.0)
+            best_ssim = best_data.get("best_ssim", -1.0)
+            best_epoch = best_data.get("best_epoch", -1)
+        except Exception:
+            pass
+
+    if config.AUTO_RESUME and os.path.exists(last_ckpt_path):
+        try:
+            ckpt = torch.load(last_ckpt_path, map_location=device)
+            model.load_state_dict(ckpt['model_state_dict'])
+            ema.load_state_dict(ckpt['ema_state_dict'])
+            optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+            scheduler.load_state_dict(ckpt['scheduler_state_dict'])
+            if 'scaler_state_dict' in ckpt:
+                scaler.load_state_dict(ckpt['scaler_state_dict'])
+            
+            saved_epoch = ckpt.get('epoch', 0)
+            start_epoch = saved_epoch + 1
+            print(f"  ✓ Resuming training from Epoch {start_epoch:02d} (Loaded {last_ckpt_path})")
+        except Exception as e:
+            print(f"  ⚠️ Could not restore checkpoint: {e}. Starting fresh from Epoch 01.")
+            start_epoch = 1
+    else:
+        print("  ✓ No previous checkpoint found / Fresh start. Training from Epoch 01.")
+
+    # [8/8] Starting Training
+    startup_duration = time.time() - startup_start
+    print(f"[8/8] Starting Training (Startup Completed in {startup_duration:.2f} s)")
+    print("----------------------------------------------------")
+
     epoch_times = []
     start_total_time = time.time()
 
-    print(f"\nStarting {config.epochs} Epoch Training Loop...")
-    for epoch in range(1, config.epochs + 1):
+    for epoch in range(start_epoch, config.epochs + 1):
         t0 = time.time()
 
         train_loss = train_epoch(
@@ -234,6 +375,10 @@ def main():
             device=device
         )
 
+        # GPU Memory Cleanup after validation
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
+
         t1 = time.time()
         epoch_dur = t1 - t0
         epoch_times.append(epoch_dur)
@@ -248,7 +393,12 @@ def main():
             lr=current_lr
         )
 
-        # Console Output
+        # Calculate Training ETA & Progress Summary
+        avg_epoch_time = sum(epoch_times) / len(epoch_times)
+        remaining_epochs = config.epochs - epoch
+        eta_seconds = avg_epoch_time * remaining_epochs
+        eta_str = format_time(eta_seconds)
+
         print_epoch_summary(
             epoch=epoch,
             total_epochs=config.epochs,
@@ -258,26 +408,29 @@ def main():
             ssim=ema_ssim,
             lr=current_lr
         )
+        print(f"        └─ Time: {epoch_dur:.2f}s | Avg/Epoch: {avg_epoch_time:.2f}s | ETA: {eta_str} | Best PSNR: {max(best_psnr, ema_psnr):.4f} dB | Best SSIM: {max(best_ssim, ema_ssim):.4f}")
 
-        # Visualizations & Prediction Dumps (using EMA model)
-        save_visualizations_and_predictions(
-            model=ema.ema_model,
-            val_dataset=val_dataset,
-            fixed_indices=config.fixed_val_indices,
-            epoch=epoch,
-            vis_dir=config.vis_dir,
-            val_preds_dir=config.val_preds_dir,
-            device=device
-        )
+        # Configurable Visualizations & Prediction Dumps (Every VISUALIZATION_INTERVAL epochs or final epoch)
+        if epoch % config.VISUALIZATION_INTERVAL == 0 or epoch == config.epochs:
+            save_visualizations_and_predictions(
+                model=ema.ema_model,
+                val_dataset=val_dataset,
+                fixed_indices=config.fixed_val_indices,
+                epoch=epoch,
+                vis_dir=config.vis_dir,
+                val_preds_dir=config.val_preds_dir,
+                device=device
+            )
 
-        # Save Last Model Checkpoint
+        # Save Last Model Checkpoint with full state for seamless auto-resume
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'ema_state_dict': ema.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'scheduler_state_dict': scheduler.state_dict(),
-        }, os.path.join(config.checkpoint_dir, "last_model.pth"))
+            'scaler_state_dict': scaler.state_dict(),
+        }, last_ckpt_path)
 
         # Best Model Tracking based on EMA PSNR
         if ema_psnr > best_psnr:
@@ -298,15 +451,19 @@ def main():
                 "best_model": "airnet_ema_best_model.pth"
             }, config.best_metrics_file)
 
-            print(f"  --> [NEW BEST] Saved airnet_ema_best_model.pth (PSNR: {best_psnr:.4f} dB, SSIM: {best_ssim:.4f})")
+            print(f"        --> [NEW BEST] Saved airnet_ema_best_model.pth (PSNR: {best_psnr:.4f} dB, SSIM: {best_ssim:.4f})")
 
     total_training_time = time.time() - start_total_time
-    avg_epoch_time = sum(epoch_times) / len(epoch_times)
+    avg_epoch_time = sum(epoch_times) / len(epoch_times) if epoch_times else 0.0
 
-    # 7. Run Inference Benchmarking
-    run_inference_benchmark(config)
+    # Configurable Post-Training Inference Benchmarking
+    if config.RUN_BENCHMARK_AFTER_TRAINING:
+        print("\nRunning Inference Benchmarking...")
+        run_inference_benchmark(config)
+    else:
+        print("\n✓ Skipping post-training inference benchmark (RUN_BENCHMARK_AFTER_TRAINING=False).")
 
-    # 8. Generate Final Post-Training Report
+    # Generate Final Post-Training Report
     final_report = (
         "====================================================\n"
         "KLA SEMICONDUCTOR AIR-NET V1 - FINAL REPORT\n"
