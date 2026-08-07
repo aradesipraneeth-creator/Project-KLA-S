@@ -594,7 +594,7 @@ def main():
         else:
             gpu_alloc, gpu_res, gpu_max = 0.0, 0.0, 0.0
 
-        # Log to CSV with GPU Memory Monitoring
+        # Log to CSV with GPU Memory & Throughput Monitoring
         csv_logger.log_epoch(
             epoch=epoch,
             train_loss=train_loss,
@@ -604,7 +604,9 @@ def main():
             lr=current_lr,
             gpu_allocated_mb=gpu_alloc,
             gpu_reserved_mb=gpu_res,
-            gpu_max_allocated_mb=gpu_max
+            gpu_peak_mb=gpu_max,
+            images_per_second=imgs_per_sec,
+            batches_per_second=batches_per_sec
         )
 
         # Calculate Training ETA & Progress Summary

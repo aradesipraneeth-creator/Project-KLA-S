@@ -1,19 +1,36 @@
 import os
 import csv
 import json
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 class CSVLogger:
     """
-    Automated logging to results.csv with columns:
-    epoch, train_loss, val_loss, psnr, ssim, learning_rate, gpu_allocated_mb, gpu_reserved_mb, gpu_max_allocated_mb
+    Automated logging to results.csv with synchronized columns for AIR-Net v1:
+    epoch, train_loss, val_loss, psnr, ssim, learning_rate,
+    gpu_allocated_mb, gpu_reserved_mb, gpu_peak_mb,
+    images_per_second, batches_per_second
     """
-    def __init__(self, csv_filepath: str):
+    DEFAULT_FIELDNAMES = [
+        "epoch",
+        "train_loss",
+        "val_loss",
+        "psnr",
+        "ssim",
+        "learning_rate",
+        "gpu_allocated_mb",
+        "gpu_reserved_mb",
+        "gpu_peak_mb",
+        "images_per_second",
+        "batches_per_second"
+    ]
+
+    def __init__(self, csv_filepath: str, extra_fieldnames: Optional[List[str]] = None):
         self.csv_filepath = csv_filepath
-        self.fieldnames = [
-            "epoch", "train_loss", "val_loss", "psnr", "ssim", "learning_rate",
-            "gpu_allocated_mb", "gpu_reserved_mb", "gpu_max_allocated_mb"
-        ]
+        self.fieldnames = list(self.DEFAULT_FIELDNAMES)
+        if extra_fieldnames:
+            for fn in extra_fieldnames:
+                if fn not in self.fieldnames:
+                    self.fieldnames.append(fn)
         
         # Initialize CSV file with headers if it doesn't exist
         os.makedirs(os.path.dirname(csv_filepath), exist_ok=True)
@@ -30,11 +47,21 @@ class CSVLogger:
         psnr: float,
         ssim: float,
         lr: float,
-        gpu_allocated_mb: Optional[float] = 0.0,
-        gpu_reserved_mb: Optional[float] = 0.0,
-        gpu_max_allocated_mb: Optional[float] = 0.0
+        gpu_allocated_mb: float = 0.0,
+        gpu_reserved_mb: float = 0.0,
+        gpu_peak_mb: Optional[float] = None,
+        gpu_max_allocated_mb: Optional[float] = None,
+        images_per_second: Optional[float] = None,
+        batches_per_second: Optional[float] = None,
+        **kwargs: Any
     ):
-        row = {
+        # Backward compatibility for legacy gpu_max_allocated_mb parameter
+        if gpu_peak_mb is None and gpu_max_allocated_mb is not None:
+            gpu_peak_mb = gpu_max_allocated_mb
+        elif gpu_peak_mb is None:
+            gpu_peak_mb = 0.0
+
+        row: Dict[str, Any] = {
             "epoch": epoch,
             "train_loss": round(train_loss, 6),
             "val_loss": round(val_loss, 6),
@@ -43,8 +70,20 @@ class CSVLogger:
             "learning_rate": f"{lr:.6e}",
             "gpu_allocated_mb": round(gpu_allocated_mb or 0.0, 2),
             "gpu_reserved_mb": round(gpu_reserved_mb or 0.0, 2),
-            "gpu_max_allocated_mb": round(gpu_max_allocated_mb or 0.0, 2)
+            "gpu_peak_mb": round(gpu_peak_mb or 0.0, 2),
+            "images_per_second": round(images_per_second or 0.0, 2) if images_per_second is not None else 0.0,
+            "batches_per_second": round(batches_per_second or 0.0, 2) if batches_per_second is not None else 0.0,
         }
+
+        # Dynamically map any additional registered fieldnames from kwargs
+        for key in self.fieldnames:
+            if key not in row and key in kwargs:
+                val = kwargs[key]
+                if isinstance(val, float):
+                    row[key] = round(val, 4)
+                else:
+                    row[key] = val
+
         with open(self.csv_filepath, mode="a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction='ignore')
             writer.writerow(row)
