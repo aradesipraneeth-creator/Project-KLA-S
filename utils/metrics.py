@@ -11,6 +11,7 @@ except ImportError:
 def calculate_psnr(pred: torch.Tensor, target: torch.Tensor, data_range: float = 1.0) -> float:
     """
     Calculates Peak Signal-to-Noise Ratio (PSNR) between prediction and ground truth.
+    Evaluated in FP32 precision.
     Args:
         pred: Tensor of shape (B, C, H, W)
         target: Tensor of shape (B, C, H, W)
@@ -18,8 +19,10 @@ def calculate_psnr(pred: torch.Tensor, target: torch.Tensor, data_range: float =
     Returns:
         float: Average PSNR across batch in dB.
     """
-    mse = F.mse_loss(pred, target, reduction='none').mean(dim=[1, 2, 3])
-    # Avoid log(0)
+    pred_f = pred.float()
+    target_f = target.float()
+
+    mse = F.mse_loss(pred_f, target_f, reduction='none').mean(dim=[1, 2, 3])
     mse = torch.clamp(mse, min=1e-10)
     psnr = 10.0 * torch.log10((data_range ** 2) / mse)
     return psnr.mean().item()
@@ -28,6 +31,7 @@ def calculate_psnr(pred: torch.Tensor, target: torch.Tensor, data_range: float =
 def calculate_ssim(pred: torch.Tensor, target: torch.Tensor, data_range: float = 1.0) -> float:
     """
     Calculates Structural Similarity Index (SSIM) between prediction and ground truth.
+    Evaluated in FP32 precision.
     Args:
         pred: Tensor of shape (B, C, H, W)
         target: Tensor of shape (B, C, H, W)
@@ -35,11 +39,15 @@ def calculate_ssim(pred: torch.Tensor, target: torch.Tensor, data_range: float =
     Returns:
         float: Average SSIM value across batch [0, 1].
     """
+    # Ensure float32 casting for evaluation calculation
+    pred_f = pred.float()
+    target_f = target.float()
+
     if HAS_PYTORCH_MSSSIM:
-        ssim_val = ssim_fn(pred, target, data_range=data_range, size_average=True)
+        ssim_val = ssim_fn(pred_f, target_f, data_range=data_range, size_average=True)
         return ssim_val.item()
     else:
-        # Fallback basic ssim calculation
+        # Fallback SSIM calculation
         from losses.hybrid_loss import FallbackSSIM
         calc = FallbackSSIM(window_size=11, channel=1, data_range=data_range)
-        return calc(pred, target).item()
+        return calc(pred_f, target_f).item()

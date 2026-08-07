@@ -8,8 +8,10 @@ from utils.edge_utils import compute_sobel_edges
 try:
     from pytorch_msssim import ssim as ssim_fn
     HAS_PYTORCH_MSSSIM = True
+    print("[OK] Using pytorch-msssim implementation.")
 except ImportError:
     HAS_PYTORCH_MSSSIM = False
+    print("[OK] Using internal FallbackSSIM implementation.")
 
 
 class AIRNetHybridLoss(nn.Module):
@@ -76,9 +78,9 @@ class AIRNetHybridLoss(nn.Module):
         if HAS_PYTORCH_MSSSIM:
             ssim_val = ssim_fn(restored_pred, target, data_range=self.data_range, size_average=True)
         else:
-            # Basic Fallback SSIM calculation
+            # Fallback SSIM calculation with AMP dtype compatibility
             from losses.hybrid_loss import FallbackSSIM
-            calc = FallbackSSIM(window_size=11, channel=1, data_range=self.data_range).to(target.device)
+            calc = FallbackSSIM(window_size=11, channel=1, data_range=self.data_range)
             ssim_val = calc(restored_pred, target)
             
         loss_ssim = 1.0 - ssim_val
@@ -93,7 +95,6 @@ class AIRNetHybridLoss(nn.Module):
         # 4. Optional LPIPS Perceptual Loss
         loss_lpips = torch.tensor(0.0, device=target.device)
         if self.use_lpips and self.lpips_fn is not None:
-            # Map 1-channel grayscale to 3-channel for LPIPS
             restored_3ch = restored_pred.repeat(1, 3, 1, 1) * 2.0 - 1.0
             target_3ch = target.repeat(1, 3, 1, 1) * 2.0 - 1.0
             loss_lpips = self.lpips_fn(restored_3ch, target_3ch).mean()
@@ -111,7 +112,10 @@ HybridLoss = AIRNetHybridLoss
 
 
 class FallbackSSIM(nn.Module):
-    """Fallback SSIM module when pytorch-msssim is unavailable."""
+    """
+    Fallback SSIM module when pytorch-msssim is unavailable.
+    Includes AMP dtype & device matching to prevent HalfTensor/FloatTensor mismatch errors.
+    """
     def __init__(self, window_size: int = 11, channel: int = 1, data_range: float = 1.0):
         super().__init__()
         self.window_size = window_size
@@ -132,16 +136,19 @@ class FallbackSSIM(nn.Module):
         c1 = (0.01 * self.data_range) ** 2
         c2 = (0.03 * self.data_range) ** 2
 
-        mu1 = F.conv2d(img1, self.window, padding=self.window_size // 2, groups=self.channel)
-        mu2 = F.conv2d(img2, self.window, padding=self.window_size // 2, groups=self.channel)
+        # Create local window matching target device and dtype (AMP HalfTensor / FloatTensor compatible)
+        window = self.window.to(device=img1.device, dtype=img1.dtype)
+
+        mu1 = F.conv2d(img1, window, padding=self.window_size // 2, groups=self.channel)
+        mu2 = F.conv2d(img2, window, padding=self.window_size // 2, groups=self.channel)
 
         mu1_sq = mu1.pow(2)
         mu2_sq = mu2.pow(2)
         mu1_mu2 = mu1 * mu2
 
-        sigma1_sq = F.conv2d(img1 * img1, self.window, padding=self.window_size // 2, groups=self.channel) - mu1_sq
-        sigma2_sq = F.conv2d(img2 * img2, self.window, padding=self.window_size // 2, groups=self.channel) - mu2_sq
-        sigma12 = F.conv2d(img1 * img2, self.window, padding=self.window_size // 2, groups=self.channel) - mu1_mu2
+        sigma1_sq = F.conv2d(img1 * img1, window, padding=self.window_size // 2, groups=self.channel) - mu1_sq
+        sigma2_sq = F.conv2d(img2 * img2, window, padding=self.window_size // 2, groups=self.channel) - mu2_sq
+        sigma12 = F.conv2d(img1 * img2, window, padding=self.window_size // 2, groups=self.channel) - mu1_mu2
 
         ssim_map = ((2 * mu1_mu2 + c1) * (2 * sigma12 + c2)) / ((mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2))
         return ssim_map.mean()

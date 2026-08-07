@@ -36,8 +36,11 @@ class SobelEdgeDetector(nn.Module):
         if img.ndim == 3:
             img = img.unsqueeze(0)
 
-        gx = F.conv2d(img, self.sobel_x, padding=1)
-        gy = F.conv2d(img, self.sobel_y, padding=1)
+        sobel_x = self.sobel_x.to(device=img.device, dtype=img.dtype)
+        sobel_y = self.sobel_y.to(device=img.device, dtype=img.dtype)
+
+        gx = F.conv2d(img, sobel_x, padding=1)
+        gy = F.conv2d(img, sobel_y, padding=1)
 
         # Compute gradient magnitude
         magnitude = torch.sqrt(gx.pow(2) + gy.pow(2) + 1e-8)
