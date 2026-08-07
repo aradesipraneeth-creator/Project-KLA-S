@@ -52,8 +52,8 @@ def load_airnet_model():
     """
     Instantiates AIRNet v1 model and loads checkpoint if available.
     """
-    config = Config()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    from utils.device import get_device
+    device = get_device()
     
     model = AIRNet(
         in_channels=config.in_channels,

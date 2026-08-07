@@ -6,12 +6,14 @@ import torch
 from configs.config import Config
 from models.restormer_baseline import RestormerBaseline
 
+from utils.device import get_device
+
 def run_test_inference(checkpoint_path: str, config: Config = None):
     if config is None:
         config = Config()
 
     config.create_dirs()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = get_device()
 
     test_lr_dir = config.test_lr_dir
     output_dir = config.test_results_dir

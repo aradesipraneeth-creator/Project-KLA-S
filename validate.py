@@ -9,11 +9,13 @@ from models.restormer_baseline import RestormerBaseline
 from losses.hybrid_loss import HybridLoss
 from utils import calculate_psnr, calculate_ssim
 
+from utils.device import get_device
+
 def validate_checkpoint(checkpoint_path: str, config: Config = None):
     if config is None:
         config = Config()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = get_device()
     print(f"Validating checkpoint: {checkpoint_path} on device: {device}")
 
     # Load Validation Dataset

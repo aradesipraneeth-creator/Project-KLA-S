@@ -6,16 +6,17 @@ import time
 import torch
 from configs.config import Config
 from models.restormer_baseline import RestormerBaseline
+from utils.device import get_device, get_device_name, is_cuda
 
 def run_inference_benchmark(config: Config) -> str:
     """
-    Measures empirical inference latency, throughput (FPS), and peak GPU memory using torch.cuda.synchronize().
+    Measures empirical inference latency, throughput (FPS), and peak GPU memory using cross-platform device handling.
     Saves results and cross-GPU estimates table to benchmark_report.txt.
     """
     config.create_dirs()
     print("Running inference benchmark...")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = get_device()
     model = RestormerBaseline(
         in_channels=config.in_channels,
         out_channels=config.out_channels,
@@ -39,42 +40,42 @@ def run_inference_benchmark(config: Config) -> str:
             _ = model(dummy_single)
             _ = model(dummy_batch)
 
-    if device.type == "cuda":
+    if is_cuda():
         torch.cuda.synchronize()
         torch.cuda.reset_peak_memory_stats()
 
     # Single Image Benchmarking
-    num_runs = 1
+    num_runs = 10
     start_time = time.perf_counter()
     with torch.no_grad():
         for _ in range(num_runs):
             _ = model(dummy_single)
-            if device.type == "cuda":
+            if is_cuda():
                 torch.cuda.synchronize()
     end_time = time.perf_counter()
     single_latency_ms = ((end_time - start_time) / num_runs) * 1000.0
-    single_fps = 1000.0 / single_latency_ms
+    single_fps = 1000.0 / single_latency_ms if single_latency_ms > 0 else 0.0
 
     # Batch Inference Benchmarking (batch_size = 4)
     start_time = time.perf_counter()
     with torch.no_grad():
         for _ in range(num_runs):
             _ = model(dummy_batch)
-            if device.type == "cuda":
+            if is_cuda():
                 torch.cuda.synchronize()
     end_time = time.perf_counter()
     batch_latency_ms = ((end_time - start_time) / num_runs) * 1000.0
-    batch_fps = (4 * 1000.0) / batch_latency_ms
+    batch_fps = (4 * 1000.0) / batch_latency_ms if batch_latency_ms > 0 else 0.0
 
     peak_vram_mb = 0.0
-    if device.type == "cuda":
+    if is_cuda():
         peak_vram_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
 
     report = (
         "====================================================\n"
         "KLA SEMICONDUCTOR RESTORATION - INFERENCE BENCHMARK REPORT\n"
         "====================================================\n"
-        f"Execution Device:         {device.type.upper()}\n"
+        f"Execution Device:         {get_device_name()}\n"
         "----------------------------------------------------\n"
         "1. SINGLE IMAGE INFERENCE (Batch Size = 1)\n"
         f"   - Average Latency:     {single_latency_ms:.2f} ms / image\n"

@@ -7,6 +7,16 @@ from .visualizer import save_visualizations_and_predictions
 from .summary import generate_model_summary
 from .reproducibility import generate_experiment_info
 from .benchmark import run_inference_benchmark
+from .device import (
+    get_device,
+    get_device_name,
+    print_device_info,
+    is_cuda,
+    is_mps,
+    is_cpu,
+    is_amp_available,
+    get_gpu_memory_info
+)
 
 __all__ = [
     "ModelEMA",
@@ -21,4 +31,12 @@ __all__ = [
     "generate_model_summary",
     "generate_experiment_info",
     "run_inference_benchmark",
+    "get_device",
+    "get_device_name",
+    "print_device_info",
+    "is_cuda",
+    "is_mps",
+    "is_cpu",
+    "is_amp_available",
+    "get_gpu_memory_info",
 ]

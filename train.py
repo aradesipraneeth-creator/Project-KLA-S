@@ -33,7 +33,14 @@ from utils import (
     save_visualizations_and_predictions,
     generate_model_summary,
     generate_experiment_info,
-    run_inference_benchmark
+    run_inference_benchmark,
+    get_device,
+    print_device_info,
+    is_cuda,
+    is_mps,
+    is_cpu,
+    is_amp_available,
+    get_gpu_memory_info
 )
 
 # ====================================================
@@ -61,16 +68,15 @@ def set_seed(seed: int = 42):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
     
-    # cuDNN Benchmark & Determinism Controls
-    if torch.cuda.is_available():
+    if is_cuda():
+        torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.benchmark = True
         torch.set_float32_matmul_precision("high")
 
 def get_amp_components(device: torch.device):
     """Returns PyTorch AMP autocast context and GradScaler supporting modern and legacy PyTorch APIs."""
-    enabled = (device.type == 'cuda')
+    enabled = is_amp_available()
     if hasattr(torch, 'amp') and hasattr(torch.amp, 'GradScaler'):
         scaler = torch.amp.GradScaler(device.type, enabled=enabled)
     else:
@@ -79,7 +85,7 @@ def get_amp_components(device: torch.device):
 
 def get_autocast_context(device: torch.device):
     """Returns PyTorch autocast context for execution device."""
-    enabled = (device.type == 'cuda')
+    enabled = is_amp_available()
     if hasattr(torch, 'amp') and hasattr(torch.amp, 'autocast'):
         return torch.amp.autocast(device_type=device.type, enabled=enabled)
     else:
@@ -318,23 +324,13 @@ def main():
     stage_dataset_to_fast_local_storage(config)
 
     # Device Selection & Hardware Diagnostics
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Execution Device:              {device}")
-
-    if device.type == "cuda":
-        gpu_name = torch.cuda.get_device_name(0)
-        cuda_ver = torch.version.cuda
-        total_mem = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-        print(f"GPU Name:                      {gpu_name}")
-        print(f"CUDA Version:                  {cuda_ver}")
-        print(f"Total GPU Memory:              {total_mem:.2f} GB")
-    else:
-        print(f"Hardware Acceleration:         {device.type.upper()}")
+    device = get_device()
+    print_device_info()
 
     effective_batch_size = config.batch_size * config.grad_accum_steps
     print(f"Batch Size (Per-GPU):          {config.batch_size}")
     print(f"Gradient Accumulation Steps:   {config.grad_accum_steps} (Effective Batch Size = {effective_batch_size})")
-    print(f"Mixed Precision Status:        {'Enabled (AMP)' if device.type == 'cuda' else 'Disabled (FP32)'}")
+    print(f"Mixed Precision Status:        {'Enabled (AMP)' if is_amp_available() else 'Disabled (FP32)'}")
     print(f"EMA Status:                    Enabled (decay={config.ema_decay})")
     print(f"Evaluation TTA Status:         {'Enabled (8-way TTA)' if config.USE_TTA else 'Disabled'}")
     print("----------------------------------------------------")
@@ -376,11 +372,16 @@ def main():
     g_gen = torch.Generator()
     g_gen.manual_seed(config.seed)
 
-    if device.type == "cuda":
+    if is_cuda():
         num_workers = min(2, os.cpu_count() or 2)
         pin_memory = True
         persistent_workers = True if num_workers > 0 else False
         prefetch_factor = 2 if num_workers > 0 else None
+    elif is_mps():
+        num_workers = 0
+        pin_memory = False
+        persistent_workers = False
+        prefetch_factor = None
     else:
         num_workers = 0
         pin_memory = False
@@ -587,12 +588,7 @@ def main():
         imgs_per_sec = total_train_images / epoch_dur
         batches_per_sec = total_train_batches / epoch_dur
 
-        if device.type == 'cuda':
-            gpu_alloc = torch.cuda.memory_allocated() / (1024 ** 2)
-            gpu_res = torch.cuda.memory_reserved() / (1024 ** 2)
-            gpu_max = torch.cuda.max_memory_allocated() / (1024 ** 2)
-        else:
-            gpu_alloc, gpu_res, gpu_max = 0.0, 0.0, 0.0
+        gpu_alloc, gpu_res, gpu_max = get_gpu_memory_info()
 
         # Log to CSV with GPU Memory & Throughput Monitoring
         csv_logger.log_epoch(
