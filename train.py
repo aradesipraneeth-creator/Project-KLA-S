@@ -3,10 +3,12 @@ import sys
 import time
 import random
 import json
+from typing import Tuple, Dict, Any, Optional
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from configs.config import Config
 from datasets.kla_dataset import get_train_val_datasets
@@ -41,14 +43,50 @@ from utils import (
 # TODO: LPIPS Training
 # ====================================================
 
+def seed_worker(worker_id):
+    """Seed each DataLoader worker for strict multi-process reproducibility."""
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
 def set_seed(seed: int = 42):
     """Sets fixed random seed across python, numpy, and PyTorch for full reproducibility."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    
+    # cuDNN Benchmark & Determinism Controls
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
+        torch.set_float32_matmul_precision("high")
+
+def get_amp_components(device: torch.device):
+    """Returns PyTorch AMP autocast context and GradScaler supporting modern and legacy PyTorch APIs."""
+    enabled = (device.type == 'cuda')
+    if hasattr(torch, 'amp') and hasattr(torch.amp, 'GradScaler'):
+        scaler = torch.amp.GradScaler(device.type, enabled=enabled)
+    else:
+        scaler = torch.cuda.amp.GradScaler(enabled=enabled)
+    return scaler
+
+def get_autocast_context(device: torch.device):
+    """Returns PyTorch autocast context for execution device."""
+    enabled = (device.type == 'cuda')
+    if hasattr(torch, 'amp') and hasattr(torch.amp, 'autocast'):
+        return torch.amp.autocast(device_type=device.type, enabled=enabled)
+    else:
+        return torch.cuda.amp.autocast(enabled=enabled)
+
+def cleanup_temporary_checkpoints(checkpoint_dir: str):
+    """Clean up any temporary .tmp checkpoint files while keeping standard models."""
+    if os.path.exists(checkpoint_dir):
+        for f in os.listdir(checkpoint_dir):
+            if f.endswith(".tmp") or f.endswith(".bak"):
+                try:
+                    os.remove(os.path.join(checkpoint_dir, f))
+                except Exception:
+                    pass
 
 def train_epoch(
     model: nn.Module,
@@ -56,26 +94,42 @@ def train_epoch(
     dataloader: DataLoader,
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
-    scaler: torch.cuda.amp.GradScaler,
+    scaler: Any,
     device: torch.device,
+    epoch: int,
+    total_epochs: int,
     grad_accum_steps: int = 8,
     max_grad_norm: float = 1.0
 ) -> float:
-    """Runs one training epoch with Mixed Precision and Gradient Accumulation."""
+    """Runs one training epoch with NaN Protection, tqdm Progress Bar, AMP, and Gradient Accumulation."""
     model.train()
     running_loss = 0.0
     optimizer.zero_grad()
 
-    for step, (lr_batch, gt_batch, _) in enumerate(dataloader, start=1):
+    pbar = tqdm(
+        dataloader,
+        desc=f"Epoch {epoch:02d}/{total_epochs:02d}",
+        leave=False,
+        dynamic_ncols=True
+    )
+
+    for step, (lr_batch, gt_batch, _) in enumerate(pbar, start=1):
         lr_batch = lr_batch.to(device)
         gt_batch = gt_batch.to(device)
 
-        with torch.cuda.amp.autocast(enabled=(device.type == 'cuda')):
+        with get_autocast_context(device):
             out_dict = model(lr_batch)
             loss = criterion(out_dict, gt_batch)
-            loss = loss / grad_accum_steps
+            
+            # NaN / Inf Protection
+            if not torch.isfinite(loss):
+                print(f"\n⚠️ Warning: Non-finite loss detected ({loss.item()}) at step {step}. Skipping step.")
+                optimizer.zero_grad()
+                continue
 
-        scaler.scale(loss).backward()
+            scaled_loss = loss / grad_accum_steps
+
+        scaler.scale(scaled_loss).backward()
         running_loss += loss.item() * grad_accum_steps
 
         if step % grad_accum_steps == 0 or step == len(dataloader):
@@ -86,6 +140,14 @@ def train_epoch(
             optimizer.zero_grad()
             ema.update(model)
 
+        # Progress bar metrics
+        gpu_mem = f"{torch.cuda.memory_allocated() / (1024**2):.0f}MB" if device.type == 'cuda' else "N/A"
+        pbar.set_postfix({
+            "loss": f"{loss.item():.4f}",
+            "lr": f"{optimizer.param_groups[0]['lr']:.2e}",
+            "gpu_mem": gpu_mem
+        })
+
     return running_loss / len(dataloader)
 
 def evaluate(
@@ -93,7 +155,7 @@ def evaluate(
     dataloader: DataLoader,
     criterion: nn.Module,
     device: torch.device
-):
+) -> Tuple[float, float, float]:
     """Evaluates model on validation set and computes Loss, PSNR, and SSIM."""
     model.eval()
     running_loss = 0.0
@@ -105,7 +167,7 @@ def evaluate(
             lr_batch = lr_batch.to(device)
             gt_batch = gt_batch.to(device)
 
-            with torch.cuda.amp.autocast(enabled=(device.type == 'cuda')):
+            with get_autocast_context(device):
                 out_dict = model(lr_batch)
                 loss = criterion(out_dict, gt_batch)
 
@@ -125,7 +187,7 @@ def evaluate(
 
     return avg_loss, avg_psnr, avg_ssim
 
-def parse_cached_bicubic_baseline(baseline_file: str):
+def parse_cached_bicubic_baseline(baseline_file: str) -> Tuple[float, float]:
     """Parses PSNR and SSIM values from cached bicubic_baseline.txt."""
     psnr_val, ssim_val = 22.9770, 0.5134
     if os.path.exists(baseline_file):
@@ -160,6 +222,7 @@ def main():
 
     # Safety Checks: Create output, checkpoint, vis, val_preds, and test_results directories
     config.create_dirs()
+    cleanup_temporary_checkpoints(config.checkpoint_dir)
     set_seed(config.seed)
 
     print("====================================================")
@@ -187,6 +250,9 @@ def main():
     print(f"EMA Status:                    Enabled (decay={config.ema_decay})")
     print("----------------------------------------------------")
 
+    # Profile Startup Phase Timings
+    t0_step = time.time()
+
     # [1/8] Dataset Statistics (Caching System)
     print("[1/8] Dataset Statistics")
     if config.SKIP_PRECOMPUTATION and os.path.exists(config.train_stats_file):
@@ -194,8 +260,10 @@ def main():
         print("  ✓ Using cached statistics.")
     else:
         generate_dataset_stats(config)
+    t_stats = time.time() - t0_step
 
     # [2/8] Bicubic Baseline (Caching System)
+    t0_step = time.time()
     print("[2/8] Bicubic Baseline")
     if config.SKIP_PRECOMPUTATION and os.path.exists(config.bicubic_baseline_file):
         print(f"  ✓ Bicubic baseline found ({config.bicubic_baseline_file}).")
@@ -203,8 +271,10 @@ def main():
         bicubic_psnr, bicubic_ssim = parse_cached_bicubic_baseline(config.bicubic_baseline_file)
     else:
         bicubic_psnr, bicubic_ssim = compute_bicubic_baseline(config)
+    t_baseline = time.time() - t0_step
 
-    # [3/8] Dataset Loading (Platform-Aware DataLoader)
+    # [3/8] Dataset Loading (Platform-Aware & Worker Seeded DataLoader)
+    t0_step = time.time()
     print("[3/8] Dataset Loading")
     train_dataset, val_dataset = get_train_val_datasets(
         train_lr_dir=config.train_lr_dir,
@@ -213,6 +283,9 @@ def main():
         train_split=config.train_split,
         val_split=config.val_split
     )
+
+    g_gen = torch.Generator()
+    g_gen.manual_seed(config.seed)
 
     if device.type == "cuda":
         num_workers = min(2, os.cpu_count() or 2)
@@ -233,7 +306,9 @@ def main():
         pin_memory=pin_memory,
         drop_last=True,
         persistent_workers=persistent_workers,
-        prefetch_factor=prefetch_factor
+        prefetch_factor=prefetch_factor,
+        worker_init_fn=seed_worker,
+        generator=g_gen
     )
 
     val_loader = DataLoader(
@@ -243,10 +318,14 @@ def main():
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=persistent_workers,
-        prefetch_factor=prefetch_factor
+        prefetch_factor=prefetch_factor,
+        worker_init_fn=seed_worker,
+        generator=g_gen
     )
+    t_loading = time.time() - t0_step
 
     # [4/8] Model Initialization
+    t0_step = time.time()
     print("[4/8] Model Initialization")
     model = AIRNet(
         in_channels=config.in_channels,
@@ -260,9 +339,19 @@ def main():
         ffn_expansion_factor=config.ffn_expansion_factor
     ).to(device)
 
+    # Optional Torch Compile Hook
+    if getattr(config, 'USE_TORCH_COMPILE', False) and hasattr(torch, 'compile'):
+        try:
+            print("  ✓ Compiling model with torch.compile()...")
+            model = torch.compile(model)
+        except Exception as e:
+            print(f"  ⚠️ torch.compile failed: {e}. Continuing without compile.")
+
     ema = ModelEMA(model, decay=config.ema_decay)
+    t_model = time.time() - t0_step
 
     # [5/8] Summary & Metadata (Caching System)
+    t0_step = time.time()
     print("[5/8] Summary & Metadata")
     if (
         config.SKIP_PRECOMPUTATION
@@ -276,8 +365,10 @@ def main():
     else:
         generate_model_summary(config, model)
         generate_experiment_info(config)
+    t_summary = time.time() - t0_step
 
     # [6/8] Loss & Optimizer Setup
+    t0_step = time.time()
     print("[6/8] Loss & Optimizer Setup")
     criterion = AIRNetHybridLoss(
         l1_weight=0.60,
@@ -300,10 +391,12 @@ def main():
         eta_min=config.min_lr
     )
 
-    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == 'cuda'))
+    scaler = get_amp_components(device)
     csv_logger = CSVLogger(config.results_csv)
+    t_opt = time.time() - t0_step
 
     # [7/8] Resume Checkpoint Verification (Auto Resume)
+    t0_step = time.time()
     print("[7/8] Resume Checkpoint Verification")
     last_ckpt_path = os.path.join(config.checkpoint_dir, "last_model.pth")
     start_epoch = 1
@@ -340,14 +433,26 @@ def main():
             start_epoch = 1
     else:
         print("  ✓ No previous checkpoint found / Fresh start. Training from Epoch 01.")
+    t_ckpt = time.time() - t0_step
 
-    # [8/8] Starting Training
+    # [8/8] Starting Training & Startup Profile Summary
     startup_duration = time.time() - startup_start
     print(f"[8/8] Starting Training (Startup Completed in {startup_duration:.2f} s)")
     print("----------------------------------------------------")
+    print("STARTUP TIMING BREAKDOWN:")
+    print(f"  - Dataset Stats:     {t_stats:.3f} s")
+    print(f"  - Bicubic Baseline:  {t_baseline:.3f} s")
+    print(f"  - Dataset Loading:   {t_loading:.3f} s")
+    print(f"  - Model Creation:    {t_model:.3f} s")
+    print(f"  - Optimizer Setup:   {t_opt:.3f} s")
+    print(f"  - Checkpoint Load:   {t_ckpt:.3f} s")
+    print("----------------------------------------------------")
 
     epoch_times = []
+    patience_counter = 0
     start_total_time = time.time()
+
+    val_loss, ema_psnr, ema_ssim = 0.0, 0.0, 0.0
 
     for epoch in range(start_epoch, config.epochs + 1):
         t0 = time.time()
@@ -360,6 +465,8 @@ def main():
             optimizer=optimizer,
             scaler=scaler,
             device=device,
+            epoch=epoch,
+            total_epochs=config.epochs,
             grad_accum_steps=config.grad_accum_steps,
             max_grad_norm=config.max_grad_norm
         )
@@ -367,30 +474,42 @@ def main():
         current_lr = optimizer.param_groups[0]['lr']
         scheduler.step()
 
-        # Evaluate EMA model on validation set
-        val_loss, ema_psnr, ema_ssim = evaluate(
-            model=ema.ema_model,
-            dataloader=val_loader,
-            criterion=criterion,
-            device=device
-        )
+        # Validation Frequency Control (VALIDATE_EVERY)
+        if epoch % config.VALIDATE_EVERY == 0 or epoch == config.epochs:
+            val_loss, ema_psnr, ema_ssim = evaluate(
+                model=ema.ema_model,
+                dataloader=val_loader,
+                criterion=criterion,
+                device=device
+            )
 
-        # GPU Memory Cleanup after validation
-        if device.type == 'cuda':
-            torch.cuda.empty_cache()
+            # GPU Memory Cleanup after validation
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
 
         t1 = time.time()
         epoch_dur = t1 - t0
         epoch_times.append(epoch_dur)
 
-        # Log to CSV
+        # GPU Memory Metrics Recording
+        if device.type == 'cuda':
+            gpu_alloc = torch.cuda.memory_allocated() / (1024 ** 2)
+            gpu_res = torch.cuda.memory_reserved() / (1024 ** 2)
+            gpu_max = torch.cuda.max_memory_allocated() / (1024 ** 2)
+        else:
+            gpu_alloc, gpu_res, gpu_max = 0.0, 0.0, 0.0
+
+        # Log to CSV with GPU Memory Monitoring
         csv_logger.log_epoch(
             epoch=epoch,
             train_loss=train_loss,
             val_loss=val_loss,
             psnr=ema_psnr,
             ssim=ema_ssim,
-            lr=current_lr
+            lr=current_lr,
+            gpu_allocated_mb=gpu_alloc,
+            gpu_reserved_mb=gpu_res,
+            gpu_max_allocated_mb=gpu_max
         )
 
         # Calculate Training ETA & Progress Summary
@@ -408,9 +527,9 @@ def main():
             ssim=ema_ssim,
             lr=current_lr
         )
-        print(f"        └─ Time: {epoch_dur:.2f}s | Avg/Epoch: {avg_epoch_time:.2f}s | ETA: {eta_str} | Best PSNR: {max(best_psnr, ema_psnr):.4f} dB | Best SSIM: {max(best_ssim, ema_ssim):.4f}")
+        print(f"        └─ Time: {epoch_dur:.2f}s | Avg/Epoch: {avg_epoch_time:.2f}s | ETA: {eta_str} | Best PSNR: {max(best_psnr, ema_psnr):.4f} dB | Best SSIM: {max(best_ssim, ema_ssim):.4f} | GPU Mem: {gpu_alloc:.0f}MB")
 
-        # Configurable Visualizations & Prediction Dumps (Every VISUALIZATION_INTERVAL epochs or final epoch)
+        # Configurable Visualizations & Prediction Dumps
         if epoch % config.VISUALIZATION_INTERVAL == 0 or epoch == config.epochs:
             save_visualizations_and_predictions(
                 model=ema.ema_model,
@@ -437,6 +556,7 @@ def main():
             best_psnr = ema_psnr
             best_ssim = ema_ssim
             best_epoch = epoch
+            patience_counter = 0
 
             # Save AIR-Net EMA Best Model and standard checkpoints
             torch.save(ema.state_dict(), os.path.join(config.checkpoint_dir, "airnet_ema_best_model.pth"))
@@ -452,6 +572,13 @@ def main():
             }, config.best_metrics_file)
 
             print(f"        --> [NEW BEST] Saved airnet_ema_best_model.pth (PSNR: {best_psnr:.4f} dB, SSIM: {best_ssim:.4f})")
+        else:
+            patience_counter += 1
+
+        # Optional Early Stopping Check
+        if getattr(config, 'EARLY_STOPPING', False) and patience_counter >= getattr(config, 'EARLY_STOP_PATIENCE', 20):
+            print(f"\n⚠️ Early stopping triggered! No improvement for {patience_counter} consecutive validation epochs.")
+            break
 
     total_training_time = time.time() - start_total_time
     avg_epoch_time = sum(epoch_times) / len(epoch_times) if epoch_times else 0.0
@@ -462,6 +589,24 @@ def main():
         run_inference_benchmark(config)
     else:
         print("\n✓ Skipping post-training inference benchmark (RUN_BENCHMARK_AFTER_TRAINING=False).")
+
+    # Optional ONNX Export Hook
+    if getattr(config, 'EXPORT_ONNX', False):
+        try:
+            onnx_path = os.path.join(config.output_dir, "airnet_v1.onnx")
+            dummy_inp = torch.randn(1, config.in_channels, 128, 128, device=device)
+            torch.onnx.export(
+                ema.ema_model,
+                dummy_inp,
+                onnx_path,
+                input_names=["input"],
+                output_names=["restored", "edge", "noise", "blur", "texture"],
+                dynamic_axes={"input": {0: "batch_size"}, "restored": {0: "batch_size"}, "edge": {0: "batch_size"}},
+                opset_version=14
+            )
+            print(f"✓ Exported ONNX model to {onnx_path}")
+        except Exception as e:
+            print(f"⚠️ ONNX export failed: {e}")
 
     # Generate Final Post-Training Report
     final_report = (

@@ -69,6 +69,12 @@ class Config:
     AUTO_RESUME: bool = True
     RUN_BENCHMARK_AFTER_TRAINING: bool = True
     VISUALIZATION_INTERVAL: int = 5
+    USE_GRADIENT_CHECKPOINTING: bool = False
+    VALIDATE_EVERY: int = 1
+    EARLY_STOPPING: bool = False
+    EARLY_STOP_PATIENCE: int = 20
+    EXPORT_ONNX: bool = False
+    USE_TORCH_COMPILE: bool = False
 
     def __post_init__(self):
         root = os.path.abspath(self.project_root)
