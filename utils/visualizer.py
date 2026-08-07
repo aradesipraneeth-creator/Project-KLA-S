@@ -20,8 +20,9 @@ def save_visualizations_and_predictions(
 ):
     """
     Evaluates model on fixed validation samples and saves:
-      1. 4-panel PNG image grids (LR, Bicubic, Prediction, Ground Truth).
-      2. Raw float32 numpy prediction arrays (.npy).
+      1. 4-panel PNG image grids (LR, Bicubic, Restored Prediction, Ground Truth).
+      2. Optional edge prediction visualization map if edge output exists in dict.
+      3. Raw float32 numpy prediction arrays (.npy).
     """
     os.makedirs(vis_dir, exist_ok=True)
     os.makedirs(val_preds_dir, exist_ok=True)
@@ -36,9 +37,15 @@ def save_visualizations_and_predictions(
             lr_batch = lr_tensor.unsqueeze(0).to(device)  # (1, 1, 128, 128)
             gt_batch = gt_tensor.unsqueeze(0).to(device)  # (1, 1, 256, 256)
 
-            # Model prediction
+            # Model prediction (Supports both Tensor and Dict outputs dynamically)
             out = model(lr_batch)
-            pred_batch = out["restored"] if isinstance(out, dict) else out
+            if isinstance(out, dict):
+                pred_batch = out.get("restored", out)
+                edge_batch = out.get("edge", None)
+            else:
+                pred_batch = out
+                edge_batch = None
+
             pred_batch_clamped = torch.clamp(pred_batch, 0.0, 1.0)
 
             # Bicubic reference
@@ -52,14 +59,13 @@ def save_visualizations_and_predictions(
 
             # Save 4-panel visual comparison PNG
             if HAS_MATPLOTLIB:
-                lr_display = bicubic_clamped.squeeze().cpu().numpy()
                 bicubic_display = bicubic_clamped.squeeze().cpu().numpy()
                 pred_display = pred_np
                 gt_display = gt_batch.squeeze().cpu().numpy()
 
                 fig, axes = plt.subplots(1, 4, figsize=(16, 4))
                 
-                axes[0].imshow(lr_display, cmap='gray')
+                axes[0].imshow(bicubic_display, cmap='gray')
                 axes[0].set_title("Input LR (Upsampled)")
                 axes[0].axis('off')
 
@@ -79,3 +85,18 @@ def save_visualizations_and_predictions(
                 png_path = os.path.join(vis_dir, f"epoch_{epoch:02d}_sample_{sample_count:03d}.png")
                 plt.savefig(png_path, dpi=150)
                 plt.close(fig)
+
+                # Optional edge prediction map saving if edge output is present
+                if edge_batch is not None:
+                    edge_clamped = torch.clamp(edge_batch, 0.0, 1.0)
+                    edge_np = edge_clamped.squeeze().cpu().numpy().astype(np.float32)
+
+                    fig_edge, ax_edge = plt.subplots(figsize=(6, 6))
+                    ax_edge.imshow(edge_np, cmap='inferno')
+                    ax_edge.set_title(f"AIR-Net Edge Map (Epoch {epoch:02d})")
+                    ax_edge.axis('off')
+                    plt.tight_layout()
+
+                    edge_png_path = os.path.join(vis_dir, f"epoch_{epoch:02d}_sample_{sample_count:03d}_edge.png")
+                    plt.savefig(edge_png_path, dpi=150)
+                    plt.close(fig_edge)
