@@ -11,9 +11,13 @@ from configs.config import Config
 from models.airnet import AIRNet
 from utils.edge_utils import compute_sobel_edges
 
+# --- Synchronize Streamlit Dashboard with Project Config (AIR-Net v1.2) ---
+config = Config(MODEL_VERSION="AIR-Net-v1.2")
+config.create_dirs()
+
 # Set Streamlit Page Configuration
 st.set_page_config(
-    page_title="KLA Semiconductor AIR-Net v1 Viewer",
+    page_title="KLA Semiconductor AIR-Net v1.2 Viewer",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -50,7 +54,7 @@ st.markdown("""
 @st.cache_resource
 def load_airnet_model():
     """
-    Instantiates AIRNet v1 model and loads checkpoint if available.
+    Instantiates AIRNet model using project Config and loads checkpoint if available.
     """
     from utils.device import get_device
     device = get_device()
@@ -69,7 +73,10 @@ def load_airnet_model():
 
     checkpoint_dir = config.checkpoint_dir
     checkpoints_to_check = [
-        ("airnet_ema_best_model.pth", os.path.join(checkpoint_dir, "airnet_ema_best_model.pth")),
+        ("airnet_v1_2_ema_best_model.pth", os.path.join(checkpoint_dir, "airnet_v1_2_ema_best_model.pth")),
+        ("airnet_v1_2_best_model.pth", os.path.join(checkpoint_dir, "airnet_v1_2_best_model.pth")),
+        ("airnet_v1_1_ema_best_model.pth", os.path.join("outputs", "v1_1", "checkpoints", "airnet_v1_1_ema_best_model.pth")),
+        ("airnet_ema_best_model.pth", os.path.join("outputs", "checkpoints", "airnet_ema_best_model.pth")),
         ("ema_best_model.pth", os.path.join(checkpoint_dir, "ema_best_model.pth")),
         ("best_model.pth", os.path.join(checkpoint_dir, "best_model.pth")),
         ("last_model.pth", os.path.join(checkpoint_dir, "last_model.pth"))
@@ -92,12 +99,22 @@ def load_airnet_model():
                 print(f"Notice loading checkpoint {path}: {e}")
 
     model.eval()
+
+    num_params = sum(p.numel() for p in model.parameters())
+    print("====================================================")
+    print("STREAMLIT DASHBOARD STARTUP VERIFICATION:")
+    print(f"  [OK] AIR-Net configuration loaded ({config.MODEL_VERSION})")
+    print(f"  [OK] AIR-Net model instantiated ({num_params:,} parameters)")
+    print(f"  [OK] Checkpoint loaded ({loaded_checkpoint_name or 'Initialized Weights'})")
+    print("  [OK] Dashboard ready")
+    print("====================================================")
+
     return model, device, loaded_checkpoint_name
 
 
 def run_airnet_inference(model, device, lr_arr: np.ndarray):
     """
-    Runs live PyTorch inference using AIR-Net v1 on a 2D LR array (128x128).
+    Runs live PyTorch inference using AIR-Net on a 2D LR array (128x128).
     Returns dict containing 2D restored array, 2D edge map, and float degradation scores.
     """
     if lr_arr.ndim == 2:
@@ -161,18 +178,18 @@ def resize_bicubic(lr_img: np.ndarray, target_shape=(256, 256)) -> np.ndarray:
 
 
 # --- Application Header ---
-st.title("🔬 KLA Semiconductor AIR-Net v1 Viewer")
-st.caption("Adaptive Image Restoration Network (AIR-Net v1) Evaluation & Degradation Diagnostics")
+st.title("🔬 KLA Semiconductor AIR-Net Viewer")
+st.caption(f"Adaptive Image Restoration Network ({config.MODEL_VERSION}) Evaluation & Degradation Diagnostics")
 
 # --- Load AIR-Net Model ---
 try:
     airnet_model, exec_device, loaded_ckpt_name = load_airnet_model()
     if loaded_ckpt_name:
-        ckpt_status_msg = f"✅ Loaded checkpoint: `{loaded_ckpt_name}` ({exec_device.type.upper()})"
+        ckpt_status_msg = f"✅ Loaded checkpoint: `{loaded_checkpoint_name}` ({exec_device.type.upper()})"
     else:
-        ckpt_status_msg = f"⚠️ No trained checkpoint found. Using initialized AIR-Net v1 weights."
+        ckpt_status_msg = f"⚠️ No trained checkpoint found. Using initialized AIR-Net weights."
 except Exception as e:
-    st.error("Error initializing AIR-Net v1 PyTorch model:")
+    st.error(f"Error initializing AIR-Net PyTorch model:")
     st.exception(e)
     airnet_model, exec_device, loaded_ckpt_name = None, torch.device("cpu"), None
     ckpt_status_msg = f"❌ Model initialization error: {e}"
@@ -187,28 +204,29 @@ lr_array, gt_array, pred_array, edge_array = None, None, None, None
 noise_val, blur_val, texture_val = 0.0, 0.0, 0.0
 selected_sample_name = "N/A"
 
-cfg = Config()
-outputs_dir = cfg.output_dir
-train_lr_dir = cfg.train_lr_dir
-train_gt_dir = cfg.train_gt_dir
-test_lr_dir = cfg.test_lr_dir
+outputs_dir = config.output_dir
+train_lr_dir = config.train_lr_dir
+train_gt_dir = config.train_gt_dir
+test_lr_dir = config.test_lr_dir
 
 if source_mode == "Training/Test Dataset Browser":
     browser_folder = st.sidebar.selectbox("Select Dataset Folder:", ["Train/train (NoisyLR + GT)", "Test_NoisyLR"])
     if browser_folder == "Train/train (NoisyLR + GT)" and os.path.exists(train_lr_dir):
         lr_files = sorted([f for f in os.listdir(train_lr_dir) if f.endswith(".npy")])
-        selected_file = st.sidebar.selectbox("Select Sample File:", lr_files)
-        selected_sample_name = selected_file
-        lr_array = np.load(os.path.join(train_lr_dir, selected_file)).astype(np.float32)
-        if os.path.exists(train_gt_dir):
-            gt_path = os.path.join(train_gt_dir, selected_file)
-            if os.path.exists(gt_path):
-                gt_array = np.load(gt_path).astype(np.float32)
+        if lr_files:
+            selected_file = st.sidebar.selectbox("Select Sample File:", lr_files)
+            selected_sample_name = selected_file
+            lr_array = np.load(os.path.join(train_lr_dir, selected_file)).astype(np.float32)
+            if os.path.exists(train_gt_dir):
+                gt_path = os.path.join(train_gt_dir, selected_file)
+                if os.path.exists(gt_path):
+                    gt_array = np.load(gt_path).astype(np.float32)
     elif browser_folder == "Test_NoisyLR" and os.path.exists(test_lr_dir):
         test_files = sorted([f for f in os.listdir(test_lr_dir) if f.endswith(".npy")])
-        selected_file = st.sidebar.selectbox("Select Test Sample:", test_files)
-        selected_sample_name = selected_file
-        lr_array = np.load(os.path.join(test_lr_dir, selected_file)).astype(np.float32)
+        if test_files:
+            selected_file = st.sidebar.selectbox("Select Test Sample:", test_files)
+            selected_sample_name = selected_file
+            lr_array = np.load(os.path.join(test_lr_dir, selected_file)).astype(np.float32)
 
 elif source_mode == "Validation Predictions Browser":
     val_preds_dir = os.path.join(outputs_dir, "validation_predictions")
@@ -218,9 +236,8 @@ elif source_mode == "Validation Predictions Browser":
             selected_pred_file = st.sidebar.selectbox("Select Validation Prediction:", npy_files)
             selected_sample_name = selected_pred_file
             try:
-                cfg = Config()
                 from datasets.kla_dataset import get_train_val_datasets
-                _, val_ds = get_train_val_datasets(train_lr_dir=cfg.train_lr_dir, train_gt_dir=cfg.train_gt_dir, seed=cfg.seed)
+                _, val_ds = get_train_val_datasets(train_lr_dir=config.train_lr_dir, train_gt_dir=config.train_gt_dir, seed=config.seed)
                 parts = selected_pred_file.split("_")
                 sample_idx_num = int(parts[1]) - 1
                 if 0 <= sample_idx_num < len(val_ds):
@@ -247,7 +264,7 @@ if gt_array is not None and gt_array.ndim > 2:
     gt_array = gt_array.squeeze()
 
 
-# --- AIR-NET V1 LIVE INFERENCE TRIGGER ---
+# --- AIR-NET LIVE INFERENCE TRIGGER ---
 if lr_array is not None and airnet_model is not None:
     try:
         airnet_out = run_airnet_inference(airnet_model, exec_device, lr_array)
@@ -257,7 +274,7 @@ if lr_array is not None and airnet_model is not None:
         blur_val = airnet_out["blur"]
         texture_val = airnet_out["texture"]
     except Exception as e:
-        st.sidebar.error("AIR-Net v1 Inference Error:")
+        st.sidebar.error("AIR-Net Inference Error:")
         st.sidebar.exception(e)
 
 # Bicubic baseline reference
@@ -265,7 +282,7 @@ bicubic_array = resize_bicubic(lr_array, (256, 256)) if lr_array is not None els
 
 # Fallback Preview if no data selected
 if lr_array is None:
-    st.info("💡 Select a sample from the sidebar to inspect AIR-Net v1 predictions.")
+    st.info("💡 Select a sample from the sidebar to inspect AIR-Net predictions.")
     np.random.seed(42)
     lr_array = np.random.rand(128, 128).astype(np.float32)
     gt_array = np.random.rand(256, 256).astype(np.float32)
@@ -293,7 +310,7 @@ st.sidebar.progress(min(max(texture_val, 0.0), 1.0))
 
 
 # --- MAIN LAYOUT 3 COLUMNS ---
-st.subheader(f"AIR-Net v1 Live Output: {selected_sample_name}")
+st.subheader(f"AIR-Net Live Output: {selected_sample_name}")
 
 col1, col2, col3 = st.columns(3)
 
@@ -326,7 +343,7 @@ with col3:
 tab1, tab2, tab3 = st.tabs([
     "🔍 Detailed Comparison & Error Heatmaps",
     "📊 Quantitative Metrics & Statistics",
-    "📄 AIR-Net v1 Reports & Metadata"
+    "📄 AIR-Net Reports & Metadata"
 ])
 
 with tab1:
@@ -369,7 +386,9 @@ with tab2:
 
 with tab3:
     st.markdown("### 📋 Model Architecture & Summary")
-    summary_path = os.path.join(outputs_dir, "model_summary.txt")
+    summary_path = os.path.join(outputs_dir, "reports", "model_summary.txt")
+    if not os.path.exists(summary_path):
+        summary_path = os.path.join(outputs_dir, "model_summary.txt")
     if os.path.exists(summary_path):
         with open(summary_path) as f:
             st.code(f.read(), language="text")
