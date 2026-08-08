@@ -683,21 +683,29 @@ def main():
             if config.MODEL_VERSION == "AIR-Net-v1.1":
                 torch.save(ema.state_dict(), os.path.join(config.checkpoint_dir, "airnet_v1_1_ema_best_model.pth"))
                 torch.save(model.state_dict(), os.path.join(config.checkpoint_dir, "airnet_v1_1_best_model.pth"))
+            elif config.MODEL_VERSION == "AIR-Net-v1.2":
+                torch.save(ema.state_dict(), os.path.join(config.checkpoint_dir, "airnet_v1_2_ema_best_model.pth"))
+                torch.save(model.state_dict(), os.path.join(config.checkpoint_dir, "airnet_v1_2_best_model.pth"))
 
             torch.save(ema.state_dict(), os.path.join(config.checkpoint_dir, "airnet_ema_best_model.pth"))
             torch.save(ema.state_dict(), os.path.join(config.checkpoint_dir, "ema_best_model.pth"))
             torch.save(model.state_dict(), os.path.join(config.checkpoint_dir, "best_model.pth"))
 
             # Save Best Metrics JSON
+            saved_name = "airnet_ema_best_model.pth"
+            if config.MODEL_VERSION == "AIR-Net-v1.1":
+                saved_name = "airnet_v1_1_ema_best_model.pth"
+            elif config.MODEL_VERSION == "AIR-Net-v1.2":
+                saved_name = "airnet_v1_2_ema_best_model.pth"
+
             save_json({
                 "model_version": config.MODEL_VERSION,
                 "best_epoch": best_epoch,
                 "best_psnr": round(best_psnr, 4),
                 "best_ssim": round(best_ssim, 4),
-                "best_model": "airnet_v1_1_ema_best_model.pth" if config.MODEL_VERSION == "AIR-Net-v1.1" else "airnet_ema_best_model.pth"
+                "best_model": saved_name
             }, config.best_metrics_file)
 
-            saved_name = "airnet_v1_1_ema_best_model.pth" if config.MODEL_VERSION == "AIR-Net-v1.1" else "airnet_ema_best_model.pth"
             print(f"        --> [NEW BEST] Saved {saved_name} (PSNR: {best_psnr:.4f} dB, SSIM: {best_ssim:.4f})")
         else:
             patience_counter += 1

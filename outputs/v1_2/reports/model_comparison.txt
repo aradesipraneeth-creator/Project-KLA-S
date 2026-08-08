@@ -1,0 +1,28 @@
+====================================================
+AIR-NET V1.2 FOUR-WAY MODEL COMPARISON REPORT
+====================================================
+Loss Weight Progression:
+  AIR-Net v1:    0.60 * L1 + 0.25 * (1-SSIM) + 0.15 * Edge
+  AIR-Net v1.1:  0.70 * L1 + 0.20 * (1-SSIM) + 0.10 * Edge
+  AIR-Net v1.2:  0.80 * L1 + 0.15 * (1-SSIM) + 0.05 * Edge
+----------------------------------------------------
+FOUR-WAY PERFORMANCE TABLE
+----------------------------------------------------
+Model         | PSNR (dB) | SSIM   | LPIPS  | Latency (ms)
+--------------+-----------+--------+--------+-------------
+Bicubic       |   22.9770 | 0.5134 | N/A    | N/A
+AIR-Net v1    |   18.7663 | 0.6320 | 0.0850 | ~25 - 45 ms (CUDA GPU)
+AIR-Net v1.1  |   20.6163 | 0.6170 | 0.0780 | ~25 - 45 ms (CUDA GPU)
+AIR-Net v1.2  |   21.8420 | 0.6015 | 0.0740 | ~25 - 45 ms (CUDA GPU)
+----------------------------------------------------
+COMPARATIVE DELTAS
+----------------------------------------------------
+AIR-Net v1.2 vs Bicubic Baseline:
+  - PSNR Difference:          -1.1350 dB
+  - SSIM Difference:          +0.0881
+
+AIR-Net v1.2 vs AIR-Net v1.1 Lead Candidate:
+  - PSNR Difference:          +1.2257 dB
+  - SSIM Difference:          -0.0155
+  - LPIPS Difference:         -0.0040
+====================================================

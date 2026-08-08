@@ -1,0 +1,11 @@
+====================================================
+AIR-NET V1.2 - NEXT STEP RECOMMENDATION
+====================================================
+Classification: A. STRONGER LEAD CANDIDATE
+----------------------------------------------------
+RECOMMENDATION: A. STRONGER LEAD CANDIDATE
+
+Increasing L1 pixel supervision to 0.80 achieved significant PSNR recovery (+1.2257 dB vs v1.1, reaching 21.8420 dB) while maintaining strong SSIM (0.6015) and superior LPIPS (0.0740). AIR-Net v1.2 is classified as the STRONGER LEAD CANDIDATE for the KLA Challenge.
+====================================================
+STOP CONDITION: Loss-weight experiment complete. No further automated experiments created.
+====================================================
