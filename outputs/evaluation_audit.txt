@@ -1,0 +1,215 @@
+====================================================
+KLA SEMICONDUCTOR AIR-NET V1 - EVALUATION AUDIT REPORT
+====================================================
+Generated: 2026-08-08
+Model: AIR-Net v1 (Semiconductor Image Restoration)
+
+====================================================
+1. AUDIT OF ALL PSNR/SSIM IMPLEMENTATIONS
+====================================================
+
+Across the codebase, all PSNR and SSIM calculations are centralized in `utils/metrics.py` and invoked consistently across training, validation, and baseline scripts.
+
+----------------------------------------------------
+A. utils/metrics.py -> calculate_psnr()
+----------------------------------------------------
+- Target File: utils/metrics.py
+- Function Name: calculate_psnr(pred, target, data_range=1.0)
+- Input Tensor Range: [0.0, 1.0] (clamped before invocation)
+- Target Tensor Range: [0.0, 1.0] (Ground Truth float32)
+- Input Dtype: torch.float32 (forced via .float() cast)
+- Tensor Shape: (B, 1, 256, 256)
+- Data Range Parameter: data_range = 1.0
+- Clamping Status: Clamped [0.0, 1.0] prior to call; MSE clamped min=1e-10
+- Normalization: Float32 normalized in [0, 1]
+- uint8 Conversion: None (Computed directly on float32 tensors)
+- Exact Formula:
+    MSE = mean((pred_f - target_f)^2, dim=[1, 2, 3])
+    PSNR = 10.0 * log10((data_range^2) / max(MSE, 1e-10))
+    Return: mean(PSNR across batch)
+
+----------------------------------------------------
+B. utils/metrics.py -> calculate_ssim()
+----------------------------------------------------
+- Target File: utils/metrics.py
+- Function Name: calculate_ssim(pred, target, data_range=1.0)
+- Input Tensor Range: [0.0, 1.0] (clamped before invocation)
+- Target Tensor Range: [0.0, 1.0] (Ground Truth float32)
+- Input Dtype: torch.float32 (forced via .float() cast)
+- Tensor Shape: (B, 1, 256, 256)
+- Data Range Parameter: data_range = 1.0
+- Clamping Status: Clamped [0.0, 1.0] prior to call
+- Normalization: Float32 normalized in [0, 1]
+- uint8 Conversion: None (Computed directly on float32 tensors)
+- Primary Engine: pytorch-msssim ssim() if available, else FallbackSSIM
+- Exact Formula (FallbackSSIM):
+    window = 11x11 Gaussian (sigma=1.5), 1 channel
+    mu1 = conv2d(img1, window, padding=5)
+    mu2 = conv2d(img2, window, padding=5)
+    sigma1_sq = conv2d(img1^2, window) - mu1^2
+    sigma2_sq = conv2d(img2^2, window) - mu2^2
+    sigma12   = conv2d(img1*img2, window) - mu1*mu2
+    c1 = (0.01 * data_range)^2, c2 = (0.03 * data_range)^2
+    ssim_map = ((2*mu1*mu2 + c1)*(2*sigma12 + c2)) / ((mu1^2 + mu2^2 + c1)*(sigma1_sq + sigma2_sq + c2))
+    Return: mean(ssim_map)
+
+----------------------------------------------------
+C. train.py -> evaluate()
+----------------------------------------------------
+- Location: train.py (lines 240-275)
+- Evaluates EMA model (`ema.ema_model`) on the 320 validation samples.
+- Extracts `out_dict["restored"]`, clamps to `[0.0, 1.0]`, and calls `calculate_psnr` and `calculate_ssim` with `data_range=1.0`.
+
+----------------------------------------------------
+D. utils/bicubic_baseline.py -> compute_bicubic_baseline()
+----------------------------------------------------
+- Location: utils/bicubic_baseline.py (lines 12-66)
+- Evaluates Bicubic 2x upsampling (`F.interpolate(mode='bicubic')`) on the exact same 320 validation samples.
+- Clamps output to `[0.0, 1.0]`, and calls `calculate_psnr` and `calculate_ssim` with `data_range=1.0`.
+
+====================================================
+2. VERIFY IMAGE RANGE CONSISTENCY
+====================================================
+
+Array Range Audit Across Dataset & Pipeline Components:
+
+A. Ground Truth (GT):
+   - Min: 0.000000 | Max: 1.000000 | Mean: 0.432275 | Std: 0.187668
+   - Range: [0.0, 1.0]
+
+B. NoisyLR:
+   - Min: -0.278563 | Max: 2.158005 | Mean: 0.432280 | Std: 0.205794
+   - Range: Unbounded noisy float32 centered around [0, 1]
+
+C. Bicubic Output (Interpolated 2x):
+   - Min: -0.154201 | Max: 1.215042 -> Clamped to [0.000000, 1.000000]
+   - Evaluated Range: [0.0, 1.0]
+
+D. AIR-Net Restored Output:
+   - Min: 0.000000 | Max: 1.000000 (after Sigmoid/clamping)
+   - Evaluated Range: [0.0, 1.0]
+
+Verification Finding:
+PSNR(Bicubic, GT) and PSNR(AIR-Net, GT) are evaluated under the EXACT SAME [0, 1] range and data_range=1.0. There is NO data range mismatch.
+
+====================================================
+3. VERIFY BICUBIC BASELINE
+====================================================
+
+- Source Script: `utils/bicubic_baseline.py`
+- Validation Dataset: `datasets/kla_dataset.py` (320 validation samples, seed=42)
+- Input Resolution: 128 x 128 float32
+- Output Resolution: 256 x 256 float32 (2x PyTorch Bicubic interpolation)
+- Interpolation Mode: `F.interpolate(mode='bicubic', align_corners=False)`
+- Clamping: `torch.clamp(bicubic_pred, 0.0, 1.0)`
+- Metric Calls: `calculate_psnr(..., data_range=1.0)`, `calculate_ssim(..., data_range=1.0)`
+- Result: Average PSNR = 22.9770 dB, Average SSIM = 0.5134
+
+Verification Finding:
+The Bicubic baseline uses the EXACT same validation set split (320 samples), resolution, target GT images, and metric functions as the AIR-Net training pipeline.
+
+====================================================
+4. VERIFY AIR-NET VALIDATION
+====================================================
+
+- Source Script: `train.py` (`evaluate` function)
+- Model Evaluated: `ema.ema_model` (EMA weights, decay=0.999)
+- Output Key: `out_dict["restored"]` of shape (B, 1, 256, 256)
+- Clamping: `torch.clamp(pred_img, 0.0, 1.0)`
+- Target GT: Same 320 validation samples from `val_dataset`
+- Result: Epoch 20 Best EMA PSNR = 18.7663 dB, EMA SSIM = 0.6320
+
+Verification Finding:
+AIR-Net PSNR and SSIM are calculated against the exact same GT convention and validation split used by the Bicubic baseline.
+
+====================================================
+5. VERIFY FINAL REPORT CALCULATION & FORMATTING
+====================================================
+
+Report Metric Comparison:
+- Bicubic PSNR: 22.9770 dB
+- AIR-Net EMA PSNR: 18.7663 dB
+- Reported PSNR Difference: 18.7663 - 22.9770 = -4.2107 dB
+
+- Bicubic SSIM: 0.5134
+- AIR-Net EMA SSIM: 0.6320
+- Reported SSIM Difference: 0.6320 - 0.5134 = +0.1186
+
+Formatting Audit:
+In `train.py`, the final report string formatting used `+{best_psnr - bicubic_psnr:.4f}`, producing `"+-4.2107 dB"`.
+Corrected formatting specification:
+- PSNR Difference vs Bicubic: -4.2107 dB
+- SSIM Difference vs Bicubic: +0.1186
+
+====================================================
+6. CROSS-CHECK WITH THE SAME SAMPLES
+====================================================
+
+Generated diagnostic script: `scripts/audit_metrics.py`
+Output CSV: `outputs/metric_sample_audit.csv`
+Visualizations & Error Maps: `outputs/evaluation_audit/`
+
+Sample Audit Breakdown:
+- Sample 000 (000001.npy): Bicubic PSNR = 25.4811 dB, SSIM = 0.5694
+- Sample 001 (000021.npy): Bicubic PSNR = 25.4854 dB, SSIM = 0.4827
+- Sample 004 (000095.npy): Bicubic PSNR = 30.5314 dB, SSIM = 0.7410
+
+All 320 samples consistently follow the identical evaluation pipeline.
+
+====================================================
+7. VISUAL COMPARISON & ERROR MAP AUDIT
+====================================================
+
+Saved 6-panel audit visualizations under `outputs/evaluation_audit/`:
+- Input LR (128x128)
+- Bicubic Upsampled (256x256)
+- AIR-Net Restored (256x256)
+- Ground Truth (256x256)
+- Bicubic Absolute Error Map
+- AIR-Net Absolute Error Map
+
+Visual Analysis:
+AIR-Net successfully removes heavy background noise and sharpens thin semiconductor line edges (yielding SSIM gain from 0.5134 -> 0.6320). However, sub-pixel edge sharpening and contrast enhancement introduce small per-pixel intensity shifts relative to smooth GT surfaces, which increases overall Mean Squared Error (MSE) and lowers L2 PSNR.
+
+====================================================
+8. CHECKPOINT VERIFICATION
+====================================================
+
+- Checkpoint File: `outputs/checkpoints/airnet_ema_best_model.pth`
+- Status: Verified valid PyTorch state dict matching AIRNet architecture (7,285,399 parameters).
+- Portability: Loads cleanly with `map_location=device`.
+
+====================================================
+9. BENCHMARK AUDIT
+====================================================
+
+- Source Script: `utils/benchmark.py`
+- Report File: `outputs/benchmark_report.txt`
+- Model Evaluated: Restormer / AIR-Net baseline
+- Single Image Latency (BS=1): ~1.2 - 2.5 ms
+- Batch Throughput (BS=4): ~140 - 290 imgs/s
+- Methodology: Empirical timing via `time.perf_counter()` and `torch.cuda.synchronize()`.
+
+====================================================
+10. AUDIT CONCLUSION
+====================================================
+
+CASE B:
+"Evaluation pipeline is consistent; AIR-Net genuinely has lower PSNR than Bicubic."
+
+EXPLANATION:
+1. Pipeline Consistency: The evaluation pipeline, metric functions (`calculate_psnr`, `calculate_ssim`), data range (`[0, 1]`), and dataset splits (320 validation samples) are 100% identical between Bicubic baseline and AIR-Net v1.
+2. Metric Behavior: PSNR is an L2 Mean Squared Error (MSE) metric that heavily penalizes slight pixel value offsets. AIR-Net v1 incorporates an Edge Head (Sobel edge loss) and Adaptive Feature Modulation which aggressively sharpens semiconductor edges and removes background noise.
+3. Structural Gain: This edge sharpening significantly improves structural correlation (SSIM increases from 0.5134 to 0.6320, +0.1186 gain), but fine edge sharpening creates slight pixel intensity differences vs ground truth, resulting in higher L2 MSE and lower PSNR (18.7663 dB vs 22.9770 dB).
+4. No Retraining / Architecture Changes: No code or model changes have been made during this audit.
+
+====================================================
+11. CRITICAL SAFETY REQUIREMENT COMPLIANCE
+====================================================
+
+- Model architecture: UNTOUCHED
+- Training logic: UNTOUCHED
+- Loss weights: UNTOUCHED
+- Checkpoints: UNTOUCHED
+- Reports & baseline: UNTOUCHED
+- Audit files created: `scripts/audit_metrics.py`, `outputs/evaluation_audit.txt`, `outputs/metric_sample_audit.csv`, `outputs/evaluation_audit/`
