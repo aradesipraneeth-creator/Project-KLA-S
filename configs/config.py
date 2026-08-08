@@ -11,6 +11,14 @@ def resolve_existing_dir(candidates: List[str], default_fallback: str) -> str:
 
 @dataclass
 class Config:
+    # --- Experiment & Model Version ---
+    MODEL_VERSION: str = "AIR-Net-v1.1"
+
+    # Loss weights for AIR-Net v1.1 (Sum = 1.0)
+    L1_WEIGHT: float = 0.70
+    SSIM_WEIGHT: float = 0.20
+    EDGE_WEIGHT: float = 0.10
+
     # --- Dataset & Paths ---
     project_root: str = field(default_factory=lambda: os.getcwd())
     train_lr_dir: str = ""
@@ -58,8 +66,9 @@ class Config:
     min_lr: float = 1e-6
     max_grad_norm: float = 1.0
     ema_decay: float = 0.999
-    loss_l1_weight: float = 0.8
-    loss_ssim_weight: float = 0.2
+    loss_l1_weight: float = 0.70
+    loss_ssim_weight: float = 0.20
+    loss_edge_weight: float = 0.10
 
     # Fixed 5 validation sample indices for tracking
     fixed_val_indices: List[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])
@@ -81,6 +90,22 @@ class Config:
     def __post_init__(self):
         root = os.path.abspath(self.project_root)
         script_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+        # Dynamic output routing for AIR-Net v1.1
+        if self.MODEL_VERSION == "AIR-Net-v1.1":
+            self.output_dir = os.path.join("outputs", "v1_1")
+            self.checkpoint_dir = os.path.join(self.output_dir, "checkpoints")
+            self.vis_dir = os.path.join(self.output_dir, "visualizations")
+            self.val_preds_dir = os.path.join(self.output_dir, "validation_predictions")
+            self.results_csv = os.path.join(self.output_dir, "results.csv")
+            self.train_stats_file = os.path.join(self.output_dir, "train_stats.txt")
+            self.bicubic_baseline_file = os.path.join(self.output_dir, "bicubic_baseline.txt")
+            self.model_summary_file = os.path.join(self.output_dir, "model_summary.txt")
+            self.experiment_info_file = os.path.join(self.output_dir, "experiment_info.json")
+            self.benchmark_report_file = os.path.join(self.output_dir, "benchmark_report.txt")
+            self.best_metrics_file = os.path.join(self.output_dir, "best_metrics.json")
+            self.final_report_file = os.path.join(self.output_dir, "final_report.txt")
+            self.test_results_dir = os.path.join(self.output_dir, "results", "pred_baseline")
 
         # 1. Resolve train_lr_dir
         if not self.train_lr_dir:

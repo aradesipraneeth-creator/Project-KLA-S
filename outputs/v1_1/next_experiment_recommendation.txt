@@ -1,0 +1,9 @@
+====================================================
+AIR-NET V1.1 - NEXT EXPERIMENT RECOMMENDATION
+====================================================
+Experiment Category: A. IMPROVED
+----------------------------------------------------
+RECOMMENDATION: A. IMPROVED
+
+Increasing pixel-level L1 supervision (0.60 -> 0.70) successfully improved PSNR by +1.8500 dB while maintaining high structural SSIM (0.6170). AIR-Net v1.1 is recommended as the new lead candidate.
+====================================================

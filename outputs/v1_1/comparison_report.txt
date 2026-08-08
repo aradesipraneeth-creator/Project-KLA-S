@@ -1,0 +1,33 @@
+====================================================
+AIR-NET V1.1 VS V1 EXPERIMENTAL COMPARISON REPORT
+====================================================
+Loss Weight Experiment Summary:
+  AIR-Net v1:    0.60 * L1 + 0.25 * (1-SSIM) + 0.15 * Edge
+  AIR-Net v1.1:  0.70 * L1 + 0.20 * (1-SSIM) + 0.10 * Edge
+----------------------------------------------------
+1. BICUBIC BASELINE
+   - Average PSNR:            22.9770 dB
+   - Average SSIM:            0.5134
+
+2. AIR-NET V1 (BASELINE EXPERIMENT)
+   - Average PSNR:            18.7663 dB
+   - Average SSIM:            0.6320
+   - Average LPIPS:           0.0850
+   - Latency (BS=1):          3004.81 ms
+
+3. AIR-NET V1.1 (CONTROLLED EXPERIMENT)
+   - Average PSNR:            20.6163 dB
+   - Average SSIM:            0.6170
+   - Average LPIPS:           0.0780
+   - Latency (BS=1):          3919.39 ms
+----------------------------------------------------
+COMPARATIVE DIFFERENCES
+----------------------------------------------------
+AIR-Net v1.1 vs Bicubic:
+   - PSNR Difference:        -2.3607 dB
+   - SSIM Difference:        +0.1036
+
+AIR-Net v1.1 vs AIR-Net v1:
+   - PSNR Difference:        +1.8500 dB
+   - SSIM Difference:        -0.0150
+====================================================
