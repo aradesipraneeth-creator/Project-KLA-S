@@ -1,0 +1,16 @@
+====================================================
+AIR-NET V1.2 CONFIGURATION COMPARISON AUDIT
+====================================================
+Parameter               | Training Config | Inference Config | Match
+------------------------+-----------------+------------------+------
+MODEL_VERSION           | AIR-Net-v1.2    | AIR-Net-v1.2     | MATCH
+in_channels             | 1               | 1                | MATCH
+out_channels            | 1               | 1                | MATCH
+dim                     | 32              | 32               | MATCH
+channels                | [32, 64, 128, 192] | [32, 64, 128, 192] | MATCH
+heads                   | [1, 2, 4, 6]    | [1, 2, 4, 6]     | MATCH
+enc_blocks              | [2, 2, 4]       | [2, 2, 4]        | MATCH
+latent_blocks           | 8               | 8                | MATCH
+dec_blocks              | [4, 2, 2]       | [4, 2, 2]        | MATCH
+ffn_expansion_factor    | 2.66            | 2.66             | MATCH
+====================================================

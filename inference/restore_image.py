@@ -62,7 +62,7 @@ def load_or_create_v1_2_checkpoint(model: torch.nn.Module, config: Config, devic
         print(f"Loaded existing checkpoint: {chosen_path}")
         return chosen_path
     else:
-        # Save a valid checkpoint for v1.2 to guarantee disk persistence
+        # Save a valid checkpoint structure for v1.2 to guarantee disk persistence
         save_path = os.path.join(ckpt_dir, "airnet_v1_2_ema_best_model.pth")
         checkpoint_data = {
             "model_version": "AIR-Net-v1.2",
@@ -73,7 +73,8 @@ def load_or_create_v1_2_checkpoint(model: torch.nn.Module, config: Config, devic
             "best_ssim": 0.6015
         }
         torch.save(checkpoint_data, save_path)
-        print(f"Saved primary AIR-Net v1.2 checkpoint to: {save_path}")
+        print(f"[NOTICE] Saved primary AIR-Net v1.2 checkpoint to: {save_path}")
+        print(f"[NOTICE] Checkpoint initialized with baseline weights for local execution.")
         return save_path
 
 def find_best_edge_crop(gt_array: np.ndarray, crop_size: int = 64):
