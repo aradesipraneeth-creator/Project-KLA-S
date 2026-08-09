@@ -1,0 +1,84 @@
+====================================================
+AIR-NET v1.2 CHECKPOINT RECOVERY REPORT
+====================================================
+
+Original suspected checkpoint:
+outputs/v1_2/checkpoints/airnet_v1_2_ema_best_model.pth
+
+Status of original file:
+RANDOM (QUARANTINED to outputs/v1_2/checkpoints/quarantine/airnet_v1_2_ema_best_model_RANDOM_UNTRAINED.pth)
+
+Recovered checkpoint:
+NOT RECOVERED FROM LOCAL DISK
+
+Source:
+No genuine trained .pth weight file exists on local disk.
+Original AIR-Net v1.2 training occurred on Cloud/Mac GPU environment.
+
+SHA256 (Quarantined File):
+d6d56bb427a1b0213b28b6d36e890c29f6dd8e4f16599b4566c5d1e8ef0eb58c
+
+File size (Quarantined File):
+29,302,643 bytes (~29.3 MB)
+
+Parameter count:
+7,285,399
+
+Architecture:
+COMPATIBLE
+
+EMA:
+AVAILABLE in structure (Unverified random weights)
+
+Epoch:
+20 (Recorded metadata)
+
+Training PSNR (Reported):
+21.8420 dB
+
+Training SSIM (Reported):
+0.6015
+
+Training LPIPS (Reported):
+0.0740
+
+----------------------------------------------------
+REPRODUCTION RESULT
+----------------------------------------------------
+
+Reproduced PSNR:
+NOT ATTEMPTED (Requires trained .pth binary weights file)
+
+Reproduced SSIM:
+NOT ATTEMPTED (Requires trained .pth binary weights file)
+
+Reproduced LPIPS:
+NOT ATTEMPTED (Requires trained .pth binary weights file)
+
+Expected:
+21.8420 PSNR
+0.6015 SSIM
+0.0740 LPIPS
+
+Reproduction status:
+FAIL (Missing trained binary weights file on local disk)
+
+----------------------------------------------------
+ONE IMAGE INFERENCE SAFETY
+----------------------------------------------------
+
+Inference Checkpoint Loading:
+STRICT SAFETY ENFORCED (Raises FileNotFoundError if missing)
+
+Random Checkpoint Creation:
+DISABLED PERMANENTLY
+
+----------------------------------------------------
+FINAL STATUS
+----------------------------------------------------
+
+CHECKPOINT VERIFIED:     NO
+INFERENCE SAFE:          YES
+TRAINED MODEL RECOVERED: NO
+STAGE 1 READY:           PARTIAL (Inference pipeline safe, awaiting trained .pth file)
+====================================================

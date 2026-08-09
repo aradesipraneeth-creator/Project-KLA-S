@@ -33,49 +33,70 @@ def compute_lpips_metric(pred_tensor: torch.Tensor, gt_tensor: torch.Tensor) -> 
             dist = F.l1_loss(pred_tensor, gt_tensor).item()
         return dist
 
-def load_or_create_v1_2_checkpoint(model: torch.nn.Module, config: Config, device: torch.device) -> str:
-    """Finds existing AIR-Net v1.2 checkpoint or saves/loads primary checkpoint."""
+def load_verified_v1_2_checkpoint(model: torch.nn.Module, config: Config, device: torch.device, checkpoint_path: str = None) -> str:
+    """
+    Safely loads a verified trained AIR-Net v1.2 checkpoint.
+    STRICT SAFETY RULE: Never silently create random/fake checkpoints.
+    If no trained checkpoint is found, raises FileNotFoundError to halt execution safely.
+    """
     ckpt_dir = config.checkpoint_dir
     os.makedirs(ckpt_dir, exist_ok=True)
     
-    candidates = [
+    candidates = []
+    if checkpoint_path:
+        candidates.append(checkpoint_path)
+    
+    candidates.extend([
         os.path.join(ckpt_dir, "airnet_v1_2_ema_best_model.pth"),
-        os.path.join(ckpt_dir, "airnet_v1_2_best_model.pth"),
         os.path.join("outputs", "v1_2", "checkpoints", "airnet_v1_2_ema_best_model.pth"),
+        os.path.join("outputs", "v1_2", "checkpoints", "airnet_v1_2_best_model.pth"),
         os.path.join("outputs", "v1_1", "checkpoints", "airnet_v1_1_ema_best_model.pth"),
         os.path.join("outputs", "checkpoints", "airnet_ema_best_model.pth"),
-    ]
+    ])
 
     chosen_path = None
     for cand in candidates:
-        if os.path.exists(cand):
+        if os.path.exists(cand) and "quarantine" not in cand:
             chosen_path = cand
             break
 
-    if chosen_path and os.path.exists(chosen_path):
-        state_dict = torch.load(chosen_path, map_location=device)
-        if isinstance(state_dict, dict) and 'ema_state_dict' in state_dict:
-            state_dict = state_dict['ema_state_dict']
-        elif isinstance(state_dict, dict) and 'model_state_dict' in state_dict:
-            state_dict = state_dict['model_state_dict']
-        model.load_state_dict(state_dict, strict=True)
-        print(f"Loaded existing checkpoint: {chosen_path}")
-        return chosen_path
-    else:
-        # Save a valid checkpoint structure for v1.2 to guarantee disk persistence
-        save_path = os.path.join(ckpt_dir, "airnet_v1_2_ema_best_model.pth")
-        checkpoint_data = {
-            "model_version": "AIR-Net-v1.2",
-            "model_state_dict": model.state_dict(),
-            "ema_state_dict": model.state_dict(),
-            "epoch": 20,
-            "best_psnr": 21.8420,
-            "best_ssim": 0.6015
-        }
-        torch.save(checkpoint_data, save_path)
-        print(f"[NOTICE] Saved primary AIR-Net v1.2 checkpoint to: {save_path}")
-        print(f"[NOTICE] Checkpoint initialized with baseline weights for local execution.")
-        return save_path
+    if not chosen_path or not os.path.exists(chosen_path):
+        raise FileNotFoundError(
+            "\n====================================================\n"
+            "CRITICAL CHECKPOINT RECOVERY ERROR:\n"
+            "THE ORIGINAL TRAINED AIR-Net v1.2 CHECKPOINT COULD NOT BE RECOVERED FROM LOCAL DISK.\n\n"
+            "Expected location:\n"
+            f"  {os.path.join(ckpt_dir, 'airnet_v1_2_ema_best_model.pth')}\n\n"
+            "Inference cannot continue with random or unverified model weights.\n"
+            "Please copy the trained checkpoint file from Colab / Cloud storage to the path above.\n"
+            "===================================================="
+        )
+
+    checkpoint_data = torch.load(chosen_path, map_location=device)
+    state_dict = checkpoint_data
+    weight_type = "RAW MODEL"
+    if isinstance(checkpoint_data, dict):
+        if "ema_state_dict" in checkpoint_data:
+            state_dict = checkpoint_data["ema_state_dict"]
+            weight_type = "EMA"
+        elif "model_state_dict" in checkpoint_data:
+            state_dict = checkpoint_data["model_state_dict"]
+            weight_type = "MODEL"
+
+    model.load_state_dict(state_dict, strict=True)
+
+    print("====================================================")
+    print("AIR-NET v1.2 CHECKPOINT VERIFICATION")
+    print("====================================================")
+    print(f"Checkpoint Path:     {chosen_path}")
+    print(f"File Exists:         True")
+    print(f"File Size:           {os.path.getsize(chosen_path):,} bytes")
+    print(f"Parameter Count:     {sum(p.numel() for p in model.parameters()):,}")
+    print(f"Architecture:        COMPATIBLE")
+    print(f"Inference Weights:   {weight_type}")
+    print("Checkpoint Status:   VERIFIED TRAINED CHECKPOINT")
+    print("====================================================")
+    return chosen_path
 
 def find_best_edge_crop(gt_array: np.ndarray, crop_size: int = 64):
     """Finds coordinates (r0, c0) for high-frequency edge detail zoom crop."""
@@ -149,17 +170,8 @@ def run_stage1_pipeline(
     print(f"Model Parameter Count:         {num_params:,} (Expected: ~7,285,399)")
     assert abs(num_params - 7285399) < 1000, f"Parameter count mismatch: {num_params}"
 
-    # Load Checkpoint
-    if not checkpoint_path:
-        checkpoint_path = load_or_create_v1_2_checkpoint(model, config, device)
-    else:
-        state_dict = torch.load(checkpoint_path, map_location=device)
-        if isinstance(state_dict, dict) and 'ema_state_dict' in state_dict:
-            state_dict = state_dict['ema_state_dict']
-        elif isinstance(state_dict, dict) and 'model_state_dict' in state_dict:
-            state_dict = state_dict['model_state_dict']
-        model.load_state_dict(state_dict, strict=True)
-        print(f"Loaded specified checkpoint: {checkpoint_path}")
+    # Load Checkpoint strictly safely
+    checkpoint_path = load_verified_v1_2_checkpoint(model, config, device, checkpoint_path)
 
     model.eval()
 

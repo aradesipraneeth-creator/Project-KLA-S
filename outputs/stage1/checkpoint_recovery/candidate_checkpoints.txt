@@ -1,0 +1,10 @@
+====================================================
+AIR-NET V1.2 CANDIDATE CHECKPOINTS SEARCH REPORT
+====================================================
+
+Candidate 1:
+  Path:     C:\Users\arade\OneDrive\Documents\KLA Project S\outputs\v1_2\checkpoints\quarantine\airnet_v1_2_ema_best_model_RANDOM_UNTRAINED.pth
+  Size:     29,302,643 bytes (27.95 MB)
+  Modified: Sun Aug  9 23:03:56 2026
+  SHA256:   08f9aa61f26bb19827823057424c9dc4a7d3f5023f5f100b6d8c21b026f4d147
+
