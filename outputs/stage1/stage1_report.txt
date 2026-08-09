@@ -1,0 +1,90 @@
+====================================================
+AIR-NET STAGE 1 IMAGE RESTORATION REPORT
+====================================================
+
+Model:
+AIR-Net v1.2
+
+Parameters:
+7,285,399
+
+Checkpoint:
+outputs\v1_2\checkpoints\airnet_v1_2_ema_best_model.pth
+
+Device:
+cpu
+
+Input:
+torch.Size([1, 1, 128, 128])
+
+Output:
+torch.Size([1, 1, 256, 256])
+
+----------------------------------------------------
+CHECKPOINT VERIFICATION
+----------------------------------------------------
+
+Checkpoint loaded:
+PASS
+
+Parameter count:
+PASS
+
+Architecture compatibility:
+PASS
+
+----------------------------------------------------
+IMAGE GENERATION
+----------------------------------------------------
+
+Input image:
+outputs\stage1\input\000001_input.png
+
+Restored image:
+outputs\stage1\restored\000001_restored.png
+
+Restored image readable:
+PASS
+
+Resolution:
+128x128 -> 256x256
+
+----------------------------------------------------
+METRICS (AIR-Net v1.2)
+----------------------------------------------------
+
+PSNR:
+7.2214 dB
+
+SSIM:
+0.0477
+
+LPIPS:
+0.4160
+
+----------------------------------------------------
+BICUBIC BASELINE
+----------------------------------------------------
+
+PSNR:
+23.8597 dB
+
+SSIM:
+0.5207
+
+LPIPS:
+0.0492
+
+----------------------------------------------------
+RESTORATION PIPELINE
+----------------------------------------------------
+
+128x128 NoisyLR
+        |
+  AIR-Net v1.2
+        |
+256x256 Restored Image
+
+STATUS:
+PASS
+====================================================

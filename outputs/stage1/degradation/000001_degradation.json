@@ -1,0 +1,8 @@
+{
+    "filename": "000001.npy",
+    "noise_output": 0.47868019342422485,
+    "blur_output": 0.539356529712677,
+    "texture_output": 0.48667824268341064,
+    "validated": false,
+    "notice": "Noise estimation output exists but requires independent calibration/validation in Stage 2."
+}
