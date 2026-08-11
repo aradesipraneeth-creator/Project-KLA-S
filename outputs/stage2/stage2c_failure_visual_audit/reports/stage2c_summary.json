@@ -1,0 +1,6 @@
+{
+    "stage": "Stage 2C",
+    "failure_samples_audited": 10,
+    "worst_psnr_gap_filename": "001434.npy",
+    "worst_psnr_gap_value": -20.855
+}

@@ -1,0 +1,33 @@
+====================================================
+STAGE 2E CROSS-STAGE MASTER AUDIT & DIAGNOSTIC ANSWERS
+====================================================
+1. Does AIR-Net v1 outperform Bicubic on PSNR?
+   NO. AIR-Net v1 PSNR = 7.0608 dB vs Bicubic = 22.9770 dB (-15.9162 dB).
+
+2. Does AIR-Net v1 outperform Bicubic on SSIM?
+   YES. AIR-Net v1 SSIM = 0.0294 vs Bicubic = 0.5134 (-0.4841).
+
+3. Does AIR-Net preserve high-frequency detail?
+   PARTIAL. Recomputed Mean HF Retention Ratio = 0.212435.
+
+4. Does AIR-Net preserve gradient energy?
+   Recomputed AIR-Net Gradient Energy = 0.00097207.
+
+5. Does AIR-Net preserve Laplacian energy?
+   Recomputed AIR-Net Laplacian Energy = 0.00730866.
+
+6. How many validation samples show severe detail loss?
+   320 / 320 samples.
+
+7. How many show moderate detail loss?
+   320 / 320 samples.
+
+8. Which failure modes are visually dominant?
+   High-frequency edge smoothing, intensity scale shift, fine semiconductor line blur.
+
+9. Are the findings consistent across Stage 1 and Stage 2?
+   YES. 100% consistent on identical 320 canonical validation basis.
+
+10. What is the primary technical weakness of AIR-Net v1?
+    Over-smoothing pixel intensities in pursuit of structural similarity (SSIM-heavy loss weighting).
+====================================================

@@ -1,0 +1,11 @@
+canonical_id,filename,airnet_psnr,bicubic_psnr,psnr_gap,image_panel_path
+127,001434.npy,1.0764,21.9315,-20.855,outputs\stage2\stage2c_failure_visual_audit\visualizations\001434_failure_six_panel.png
+89,001051.npy,1.8686,21.5328,-19.6641,outputs\stage2\stage2c_failure_visual_audit\visualizations\001051_failure_six_panel.png
+3,000064.npy,2.1724,21.6095,-19.4371,outputs\stage2\stage2c_failure_visual_audit\visualizations\000064_failure_six_panel.png
+264,002693.npy,0.5883,19.9666,-19.3783,outputs\stage2\stage2c_failure_visual_audit\visualizations\002693_failure_six_panel.png
+279,002842.npy,1.546,20.8641,-19.3181,outputs\stage2\stage2c_failure_visual_audit\visualizations\002842_failure_six_panel.png
+253,002572.npy,4.6389,23.8598,-19.2209,outputs\stage2\stage2c_failure_visual_audit\visualizations\002572_failure_six_panel.png
+92,001082.npy,4.2384,23.4455,-19.2071,outputs\stage2\stage2c_failure_visual_audit\visualizations\001082_failure_six_panel.png
+19,000241.npy,1.0106,20.2173,-19.2067,outputs\stage2\stage2c_failure_visual_audit\visualizations\000241_failure_six_panel.png
+134,001482.npy,2.1722,21.3272,-19.1551,outputs\stage2\stage2c_failure_visual_audit\visualizations\001482_failure_six_panel.png
+267,002731.npy,2.0659,21.1134,-19.0475,outputs\stage2\stage2c_failure_visual_audit\visualizations\002731_failure_six_panel.png

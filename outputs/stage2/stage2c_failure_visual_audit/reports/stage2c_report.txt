@@ -1,0 +1,7 @@
+====================================================
+STAGE 2C FAILURE VISUAL AUDIT REPORT
+====================================================
+Audited Failure Samples:     10
+Worst PSNR Gap Sample:       001434.npy (-20.8550 dB)
+Observable Failure Modes:    High-frequency detail smoothing, fine line edge softening, intensity bias shift
+====================================================

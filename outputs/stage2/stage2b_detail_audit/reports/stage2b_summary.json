@@ -1,0 +1,14 @@
+{
+    "stage": "Stage 2B",
+    "total_samples": 320,
+    "severe_detail_loss_count": 320,
+    "moderate_detail_loss_count": 320,
+    "airnet_psnr_wins": 0,
+    "bicubic_psnr_wins": 320,
+    "airnet_ssim_wins": 0,
+    "historical_reference_severe_loss": 270,
+    "historical_reference_moderate_loss": 310,
+    "historical_reference_psnr_wins": 1,
+    "historical_reference_bicubic_wins": 319,
+    "historical_reference_ssim_wins": 25
+}

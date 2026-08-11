@@ -1,0 +1,8 @@
+stage,artifact,type,path,exists,description
+Stage 2A,Metrics CSV,CSV,stage2a_frequency_audit/metrics/stage2a_320_frequency_metrics.csv,True,"High-frequency, gradient, and Laplacian energy metrics"
+Stage 2B,Metrics CSV,CSV,stage2b_detail_audit/metrics/stage2b_320_detail_metrics.csv,True,Detail loss classification and PSNR/SSIM win ratios
+Stage 2C,Visualizations,PNG,stage2c_failure_visual_audit/visualizations/,True,6-panel failure analysis images
+Stage 2D,Metrics CSV,CSV,stage2d_degradation_audit/metrics/stage2d_degradation_metrics.csv,True,Residual and degradation statistics
+Stage 2E,Master Matrix,CSV,stage2e_cross_stage_audit/metrics/cross_stage_sample_audit.csv,True,Cross-stage master sample evidence matrix
+Stage 2,Master Report,TXT,STAGE2_MASTER_REPORT.txt,True,Stage 2 master audit report
+Stage 2,Master Manifest,JSON,stage2_manifest.json,True,Stage 2 machine-readable manifest

@@ -1,0 +1,49 @@
+============================================================
+AIR-Net v1 — STAGE 2 MASTER AUDIT REPORT
+============================================================
+
+1. EXECUTIVE SUMMARY:
+   Completed Stage 2A -> 2E audit across all 320 canonical validation samples.
+   Recomputed AIR-Net v1 PSNR = 7.0608 dB | SSIM = 0.0294
+   Bicubic 2x Baseline PSNR   = 22.9770 dB | SSIM = 0.5134
+
+2. ENVIRONMENT:
+   Device: cpu | GPU: CPU Mode | PyTorch: 2.13.0+cpu | CUDA: N/A
+
+3. DATASET & VALIDATION BASIS:
+   3200 total paired samples (2880 Train / 320 Validation basis, Seed 42).
+   Authoritative Mapping SHA-256: d3c8c112fb5a0b48f95b2557b68d133902ac3a1f36487b990b14717f70fa2434
+
+4. CHECKPOINT INFORMATION:
+   Path: NONE
+   SHA-256: NO_CHECKPOINT_FOUND
+
+5. STAGE 2A RESULTS (Frequency & Gradient Audit):
+   Recomputed Mean HF Retention Ratio:       0.212435
+   Recomputed AIR-Net Gradient Energy:       0.00097207
+   Recomputed AIR-Net Laplacian Energy:      0.00730866
+
+6. STAGE 2B RESULTS (Detail Loss Audit):
+   Severe Detail Loss Count:   320 / 320
+   Moderate Detail Loss Count: 320 / 320
+   AIR-Net PSNR Wins:          0 / 320
+   Bicubic PSNR Wins:          320 / 320
+   AIR-Net SSIM Wins:          0 / 320
+
+7. STAGE 2C RESULTS (Failure Visual Audit):
+   Generated 6-panel failure analysis images in C:\Users\arade\OneDrive\Documents\KLA Project S\outputs\stage2\stage2c_failure_visual_audit/visualizations/
+
+8. STAGE 2D RESULTS (Degradation Audit):
+   Mean AIR-Net MAE Residual: 0.437040
+   Mean Bicubic MAE Residual: 0.055414
+
+9. STAGE 2E RESULTS (Cross-Stage Master Evidence Matrix):
+   Unified 320-sample master matrix saved to C:\Users\arade\OneDrive\Documents\KLA Project S\outputs\stage2\stage2e_cross_stage_audit\metrics\cross_stage_sample_audit.csv
+
+10. SAFETY & INTEGRITY VERIFICATION:
+   [OK] No training performed
+   [OK] No checkpoint modification (READ-ONLY)
+   [OK] No fabricated metrics
+   [OK] No validation mapping modification
+   [OK] AIR-Net v1 only (No v1.2)
+============================================================

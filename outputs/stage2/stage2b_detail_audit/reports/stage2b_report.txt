@@ -1,0 +1,10 @@
+====================================================
+STAGE 2B DETAIL LOSS & SAMPLE PERFORMANCE REPORT
+====================================================
+Validation Basis:                  320 Canonical Samples
+Severe Detail Loss Count:          320 / 320 (Hist Ref: 270)
+Moderate Detail Loss Count:        320 / 320 (Hist Ref: 310)
+AIR-Net PSNR Wins:                 0 / 320 (Hist Ref: 1)
+Bicubic PSNR Wins:                 320 / 320 (Hist Ref: 319)
+AIR-Net SSIM Wins:                 0 / 320 (Hist Ref: 25)
+====================================================

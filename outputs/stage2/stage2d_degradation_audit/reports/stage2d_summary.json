@@ -1,0 +1,5 @@
+{
+    "stage": "Stage 2D",
+    "mean_mae_residual_airnet": 0.43704,
+    "mean_mae_residual_bicubic": 0.055414
+}

@@ -1,0 +1,9 @@
+{
+    "stage": "Stage 2A",
+    "mean_hf_retention_ratio": 0.212435,
+    "mean_gradient_energy_airnet": 0.00097207,
+    "mean_laplacian_energy_airnet": 0.00730866,
+    "historical_reference_hf_retention": 0.1737,
+    "historical_reference_gradient_energy": 0.00099415,
+    "historical_reference_laplacian_energy": 0.00151618
+}
