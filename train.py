@@ -114,7 +114,7 @@ def stage_dataset_to_fast_local_storage(config: Config):
 
     if os.path.exists(source_lr_dir) and os.path.exists(source_gt_dir):
         if not (os.path.exists(local_lr_dir) and os.path.exists(local_gt_dir)):
-            print(f"  ✓ Copying dataset to fast local storage ({local_root})...")
+            print(f"  [OK] Copying dataset to fast local storage ({local_root})...")
             try:
                 os.makedirs(local_lr_dir, exist_ok=True)
                 os.makedirs(local_gt_dir, exist_ok=True)
@@ -127,7 +127,7 @@ def stage_dataset_to_fast_local_storage(config: Config):
                 for f in gt_files:
                     shutil.copy2(os.path.join(source_gt_dir, f), os.path.join(local_gt_dir, f))
 
-                print(f"  ✓ Successfully staged {len(lr_files)} samples to fast local SSD storage.")
+                print(f"  [OK] Successfully staged {len(lr_files)} samples to fast local SSD storage.")
             except Exception as e:
                 print(f"  ⚠️ Fast local staging notice: {e}. Falling back to original dataset paths.")
                 return
@@ -135,7 +135,7 @@ def stage_dataset_to_fast_local_storage(config: Config):
         # Update dataset paths to point to fast local copy
         config.train_lr_dir = local_lr_dir
         config.train_gt_dir = local_gt_dir
-        print(f"  ✓ Fast local dataset staging active: '{local_root}'. Training from SSD copy.")
+        print(f"  [OK] Fast local dataset staging active: '{local_root}'. Training from SSD copy.")
 
 def cleanup_temporary_checkpoints(checkpoint_dir: str):
     """Clean up any temporary .tmp checkpoint files while keeping standard models."""
@@ -333,18 +333,18 @@ def main():
     print(f"New checkpoint directory:      {config.checkpoint_dir}")
     print("====================================================")
     print("Pre-training verification checks:")
-    print("  ✓ AIR-Net architecture unchanged")
-    print("  ✓ Parameter count unchanged")
-    print("  ✓ Dataset unchanged")
-    print("  ✓ Optimizer unchanged")
-    print("  ✓ Scheduler unchanged")
-    print("  ✓ EMA unchanged")
-    print("  ✓ AMP unchanged")
-    print("  ✓ Validation unchanged")
-    print("  ✓ PSNR unchanged")
-    print("  ✓ SSIM unchanged")
-    print("  ✓ Only loss weights changed")
-    print("  ✓ AIR-Net v1 checkpoints preserved")
+    print("  [OK] AIR-Net architecture unchanged")
+    print("  [OK] Parameter count unchanged")
+    print("  [OK] Dataset unchanged")
+    print("  [OK] Optimizer unchanged")
+    print("  [OK] Scheduler unchanged")
+    print("  [OK] EMA unchanged")
+    print("  [OK] AMP unchanged")
+    print("  [OK] Validation unchanged")
+    print("  [OK] PSNR unchanged")
+    print("  [OK] SSIM unchanged")
+    print("  [OK] Loss weights configured")
+    print("  [OK] AIR-Net v1 checkpoints preserved")
     print("====================================================")
 
     # Optional Dataset Staging to fast local SSD storage
@@ -368,8 +368,8 @@ def main():
     # [1/8] Dataset Statistics (Caching System)
     print("[1/8] Dataset Statistics")
     if config.SKIP_PRECOMPUTATION and os.path.exists(config.train_stats_file):
-        print(f"  ✓ Dataset statistics found ({config.train_stats_file}).")
-        print("  ✓ Using cached statistics.")
+        print(f"  [OK] Dataset statistics found ({config.train_stats_file}).")
+        print("  [OK] Using cached statistics.")
     else:
         generate_dataset_stats(config)
     t_stats = time.time() - t0_step
@@ -378,8 +378,8 @@ def main():
     t0_step = time.time()
     print("[2/8] Bicubic Baseline")
     if config.SKIP_PRECOMPUTATION and os.path.exists(config.bicubic_baseline_file):
-        print(f"  ✓ Bicubic baseline found ({config.bicubic_baseline_file}).")
-        print("  ✓ Using cached baseline.")
+        print(f"  [OK] Bicubic baseline found ({config.bicubic_baseline_file}).")
+        print("  [OK] Using cached baseline.")
         bicubic_psnr, bicubic_ssim = parse_cached_bicubic_baseline(config.bicubic_baseline_file)
     else:
         bicubic_psnr, bicubic_ssim = compute_bicubic_baseline(config)
@@ -459,7 +459,7 @@ def main():
     # Optional Torch Compile Hook
     if getattr(config, 'USE_TORCH_COMPILE', False) and hasattr(torch, 'compile'):
         try:
-            print("  ✓ Compiling model with torch.compile()...")
+            print("  [OK] Compiling model with torch.compile()...")
             model = torch.compile(model)
         except Exception as e:
             print(f"  ⚠️ torch.compile failed: {e}. Continuing without compile.")
@@ -475,10 +475,10 @@ def main():
         and os.path.exists(config.model_summary_file)
         and os.path.exists(config.experiment_info_file)
     ):
-        print(f"  ✓ Model summary found ({config.model_summary_file}).")
-        print("  ✓ Using cached summary.")
-        print(f"  ✓ Experiment metadata found ({config.experiment_info_file}).")
-        print("  ✓ Using cached metadata.")
+        print(f"  [OK] Model summary found ({config.model_summary_file}).")
+        print("  [OK] Using cached summary.")
+        print(f"  [OK] Experiment metadata found ({config.experiment_info_file}).")
+        print("  [OK] Using cached metadata.")
     else:
         generate_model_summary(config, model)
         generate_experiment_info(config)
@@ -544,12 +544,12 @@ def main():
             
             saved_epoch = ckpt.get('epoch', 0)
             start_epoch = saved_epoch + 1
-            print(f"  ✓ Resuming training from Epoch {start_epoch:02d} (Loaded {last_ckpt_path})")
+            print(f"  [OK] Resuming training from Epoch {start_epoch:02d} (Loaded {last_ckpt_path})")
         except Exception as e:
             print(f"  ⚠️ Could not restore checkpoint: {e}. Starting fresh from Epoch 01.")
             start_epoch = 1
     else:
-        print("  ✓ No previous checkpoint found / Fresh start. Training from Epoch 01.")
+        print("  [OK] No previous checkpoint found / Fresh start. Training from Epoch 01.")
     t_ckpt = time.time() - t0_step
 
     # [8/8] Starting Training & Startup Profile Summary
@@ -723,7 +723,7 @@ def main():
         print("\nRunning Inference Benchmarking...")
         run_inference_benchmark(config)
     else:
-        print("\n✓ Skipping post-training inference benchmark (RUN_BENCHMARK_AFTER_TRAINING=False).")
+        print("\n[OK] Skipping post-training inference benchmark (RUN_BENCHMARK_AFTER_TRAINING=False).")
 
     # Optional ONNX Export Hook
     if getattr(config, 'EXPORT_ONNX', False):
@@ -739,7 +739,7 @@ def main():
                 dynamic_axes={"input": {0: "batch_size"}, "restored": {0: "batch_size"}, "edge": {0: "batch_size"}},
                 opset_version=14
             )
-            print(f"✓ Exported ONNX model to {onnx_path}")
+            print(f"[OK] Exported ONNX model to {onnx_path}")
         except Exception as e:
             print(f"⚠️ ONNX export failed: {e}")
 

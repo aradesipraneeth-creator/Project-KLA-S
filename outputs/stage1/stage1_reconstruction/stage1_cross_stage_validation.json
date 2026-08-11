@@ -1,0 +1,32 @@
+[
+    {
+        "stage": "Stage 1A",
+        "samples_evaluated": 320,
+        "validation_mapping_sha256": "d3c8c112fb5a0b48f95b2557b68d133902ac3a1f36487b990b14717f70fa2434",
+        "status": "PASS"
+    },
+    {
+        "stage": "Stage 1B",
+        "samples_evaluated": 320,
+        "validation_mapping_sha256": "d3c8c112fb5a0b48f95b2557b68d133902ac3a1f36487b990b14717f70fa2434",
+        "status": "PASS"
+    },
+    {
+        "stage": "Stage 1C",
+        "samples_evaluated": 320,
+        "validation_mapping_sha256": "d3c8c112fb5a0b48f95b2557b68d133902ac3a1f36487b990b14717f70fa2434",
+        "status": "PASS"
+    },
+    {
+        "stage": "Stage 1D",
+        "samples_evaluated": 320,
+        "validation_mapping_sha256": "d3c8c112fb5a0b48f95b2557b68d133902ac3a1f36487b990b14717f70fa2434",
+        "status": "PASS"
+    },
+    {
+        "stage": "Stage 1E",
+        "samples_evaluated": 320,
+        "validation_mapping_sha256": "d3c8c112fb5a0b48f95b2557b68d133902ac3a1f36487b990b14717f70fa2434",
+        "status": "PASS"
+    }
+]

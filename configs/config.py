@@ -12,12 +12,12 @@ def resolve_existing_dir(candidates: List[str], default_fallback: str) -> str:
 @dataclass
 class Config:
     # --- Experiment & Model Version ---
-    MODEL_VERSION: str = "AIR-Net-v1.2"
+    MODEL_VERSION: str = "AIR-Net-v1"
 
-    # Loss weights for AIR-Net v1.2 (Sum = 1.00)
-    L1_WEIGHT: float = 0.80
-    SSIM_WEIGHT: float = 0.15
-    EDGE_WEIGHT: float = 0.05
+    # Loss weights for AIR-Net v1 (Sum = 1.00)
+    L1_WEIGHT: float = 0.60
+    SSIM_WEIGHT: float = 0.25
+    EDGE_WEIGHT: float = 0.15
 
     # --- Dataset & Paths ---
     project_root: str = field(default_factory=lambda: os.getcwd())

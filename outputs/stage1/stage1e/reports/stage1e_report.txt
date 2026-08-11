@@ -1,0 +1,3 @@
+Stage 1E Consistency & Visual Audit Report
+Worst PSNR: 0.5883 (002693.npy)
+Best PSNR: 18.9313 (001579.npy)

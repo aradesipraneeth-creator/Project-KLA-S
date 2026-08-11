@@ -1,0 +1,3 @@
+Stage 1B Baseline Comparison Report
+AIR-Net PSNR: 7.0608 dB
+Bicubic PSNR: 22.9770 dB

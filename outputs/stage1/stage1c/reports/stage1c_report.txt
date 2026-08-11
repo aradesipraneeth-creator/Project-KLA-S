@@ -1,0 +1,3 @@
+Stage 1C High-Frequency & Edge Preservation Report
+Mean Edge MAE AIR-Net: 0.261786
+Mean Edge MAE Bicubic: 0.271571

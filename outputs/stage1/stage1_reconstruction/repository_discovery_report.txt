@@ -1,0 +1,66 @@
+====================================================
+AIR-NET V1 STAGE 1 REPOSITORY DISCOVERY REPORT
+====================================================
+
+Term: stage1 (Found in 5 files)
+  - inference\restore_image.py
+  - scripts\audit_inference_mismatch.py
+  - scripts\checkpoint_recovery_audit.py
+  - scripts\reconstruct_stage1_pipeline.py
+  - tests\test_stage1_restoration.py
+
+Term: stage1a (Found in 1 files)
+  - scripts\reconstruct_stage1_pipeline.py
+
+Term: stage1b (Found in 1 files)
+  - scripts\reconstruct_stage1_pipeline.py
+
+Term: stage1c (Found in 1 files)
+  - scripts\reconstruct_stage1_pipeline.py
+
+Term: stage1d (Found in 1 files)
+  - scripts\reconstruct_stage1_pipeline.py
+
+Term: stage1e (Found in 1 files)
+  - scripts\reconstruct_stage1_pipeline.py
+
+Term: AIR-Net (Found in 23 files)
+  - app.py
+  - configs\config.py
+  - inference\restore_image.py
+  - losses\hybrid_loss.py
+  - models\adaptive_modulation.py
+  ... and 18 more
+
+Term: PSNR (Found in 18 files)
+  - app.py
+  - check_bsnr_baseline.py
+  - inference\restore_image.py
+  - kla_dataset_report.py
+  - kla_hard_samples_analysis.py
+  ... and 13 more
+
+Term: SSIM (Found in 22 files)
+  - app.py
+  - check_ssim_baseline.py
+  - configs\config.py
+  - inference\restore_image.py
+  - kla_dataset_report.py
+  ... and 17 more
+
+Term: LPIPS (Found in 6 files)
+  - inference\restore_image.py
+  - losses\hybrid_loss.py
+  - scripts\evaluate_v1_1.py
+  - scripts\evaluate_v1_2.py
+  - scripts\reconstruct_stage1_pipeline.py
+  ... and 1 more
+
+Term: edge (Found in 18 files)
+  - app.py
+  - check_edge_energy.py
+  - code check.py
+  - configs\config.py
+  - inference\restore_image.py
+  ... and 13 more
+

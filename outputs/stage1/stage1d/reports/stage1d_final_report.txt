@@ -1,0 +1,14 @@
+====================================================
+STAGE 1D AUTHORITATIVE 320-SAMPLE VALIDATION REPORT
+====================================================
+Validation Basis:         320 Paired Samples
+AIR-Net v1 PSNR:          7.0608 dB
+AIR-Net v1 SSIM:          0.0294
+AIR-Net v1 LPIPS:         0.4370
+Bicubic Baseline PSNR:    22.9770 dB
+Bicubic Baseline SSIM:    0.5134
+Bicubic Baseline LPIPS:   0.0554
+----------------------------------------------------
+PSNR Difference vs Bicubic: -15.9162 dB
+SSIM Difference vs Bicubic: -0.4841
+====================================================

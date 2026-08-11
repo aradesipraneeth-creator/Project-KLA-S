@@ -1,0 +1,121 @@
+{
+    "stage1": [
+        "inference\\restore_image.py",
+        "scripts\\audit_inference_mismatch.py",
+        "scripts\\checkpoint_recovery_audit.py",
+        "scripts\\reconstruct_stage1_pipeline.py",
+        "tests\\test_stage1_restoration.py"
+    ],
+    "stage1a": [
+        "scripts\\reconstruct_stage1_pipeline.py"
+    ],
+    "stage1b": [
+        "scripts\\reconstruct_stage1_pipeline.py"
+    ],
+    "stage1c": [
+        "scripts\\reconstruct_stage1_pipeline.py"
+    ],
+    "stage1d": [
+        "scripts\\reconstruct_stage1_pipeline.py"
+    ],
+    "stage1e": [
+        "scripts\\reconstruct_stage1_pipeline.py"
+    ],
+    "AIR-Net": [
+        "app.py",
+        "configs\\config.py",
+        "inference\\restore_image.py",
+        "losses\\hybrid_loss.py",
+        "models\\adaptive_modulation.py",
+        "models\\airnet.py",
+        "models\\degradation_analyzer.py",
+        "models\\edge_head.py",
+        "scripts\\audit_inference_mismatch.py",
+        "scripts\\audit_metrics.py",
+        "scripts\\checkpoint_recovery_audit.py",
+        "scripts\\evaluate_v1_1.py",
+        "scripts\\evaluate_v1_2.py",
+        "scripts\\inspect_v1_checkpoints.py",
+        "scripts\\reconstruct_stage1_pipeline.py",
+        "test_amp_ssim.py",
+        "test_device.py",
+        "test_visualizer.py",
+        "tests\\test_stage1_restoration.py",
+        "train.py",
+        "utils\\logger.py",
+        "utils\\summary.py",
+        "utils\\visualizer.py"
+    ],
+    "PSNR": [
+        "app.py",
+        "check_bsnr_baseline.py",
+        "inference\\restore_image.py",
+        "kla_dataset_report.py",
+        "kla_hard_samples_analysis.py",
+        "scripts\\audit_inference_mismatch.py",
+        "scripts\\audit_metrics.py",
+        "scripts\\checkpoint_recovery_audit.py",
+        "scripts\\evaluate_v1_1.py",
+        "scripts\\evaluate_v1_2.py",
+        "scripts\\inspect_v1_checkpoints.py",
+        "scripts\\reconstruct_stage1_pipeline.py",
+        "tests\\test_stage1_restoration.py",
+        "train.py",
+        "utils\\bicubic_baseline.py",
+        "utils\\logger.py",
+        "utils\\metrics.py",
+        "validate.py"
+    ],
+    "SSIM": [
+        "app.py",
+        "check_ssim_baseline.py",
+        "configs\\config.py",
+        "inference\\restore_image.py",
+        "kla_dataset_report.py",
+        "kla_hard_samples_analysis.py",
+        "losses\\hybrid_loss.py",
+        "scripts\\audit_inference_mismatch.py",
+        "scripts\\audit_metrics.py",
+        "scripts\\checkpoint_recovery_audit.py",
+        "scripts\\evaluate_v1_1.py",
+        "scripts\\evaluate_v1_2.py",
+        "scripts\\inspect_v1_checkpoints.py",
+        "scripts\\reconstruct_stage1_pipeline.py",
+        "test_amp_ssim.py",
+        "tests\\test_stage1_restoration.py",
+        "train.py",
+        "utils\\bicubic_baseline.py",
+        "utils\\logger.py",
+        "utils\\metrics.py",
+        "utils\\reproducibility.py",
+        "validate.py"
+    ],
+    "LPIPS": [
+        "inference\\restore_image.py",
+        "losses\\hybrid_loss.py",
+        "scripts\\evaluate_v1_1.py",
+        "scripts\\evaluate_v1_2.py",
+        "scripts\\reconstruct_stage1_pipeline.py",
+        "train.py"
+    ],
+    "edge": [
+        "app.py",
+        "check_edge_energy.py",
+        "code check.py",
+        "configs\\config.py",
+        "inference\\restore_image.py",
+        "kla_dataset_report.py",
+        "losses\\hybrid_loss.py",
+        "models\\__init__.py",
+        "models\\airnet.py",
+        "models\\edge_head.py",
+        "scripts\\evaluate_v1_2.py",
+        "scripts\\reconstruct_stage1_pipeline.py",
+        "test_airnet.py",
+        "test_amp_ssim.py",
+        "test_visualizer.py",
+        "train.py",
+        "utils\\edge_utils.py",
+        "utils\\visualizer.py"
+    ]
+}

@@ -1,0 +1,2 @@
+AIR-Net v1 Architecture Parameters: 7,285,399
+Version: AIR-Net-v1

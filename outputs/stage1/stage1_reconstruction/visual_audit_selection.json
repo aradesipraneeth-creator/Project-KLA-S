@@ -1,0 +1,6 @@
+{
+    "first_sample": "000001.npy",
+    "worst_psnr_sample": "002693.npy",
+    "best_psnr_sample": "001579.npy",
+    "median_psnr_sample": "003160.npy"
+}

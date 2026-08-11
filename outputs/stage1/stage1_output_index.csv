@@ -1,0 +1,10 @@
+stage,artifact_type,path,exists,rows,description
+Stage 1,Discovery Report,stage1_reconstruction\repository_discovery_report.txt,True,11,Repository discovery analysis
+Stage 1,Validation Mapping CSV,stage1_reconstruction\authoritative_validation_mapping.csv,True,320,Canonical 320-sample validation split
+Stage 1A,Metrics CSV,stage1a\metrics\stage1a_metrics.csv,True,320,Stage 1A metrics
+Stage 1B,Metrics CSV,stage1b\metrics\stage1b_metrics.csv,True,320,Stage 1B baseline comparison metrics
+Stage 1C,Metrics CSV,stage1c\metrics\stage1c_metrics.csv,True,320,Stage 1C edge preservation metrics
+Stage 1D,Metrics CSV,stage1d\metrics\stage1d_320_validation_metrics.csv,True,320,Stage 1D authoritative 320-sample validation metrics
+Stage 1E,Metrics CSV,stage1e\metrics\stage1e_metrics.csv,True,3,Stage 1E hard/representative visual audit metrics
+Stage 1,Master Report,STAGE1_MASTER_REPORT.txt,True,1,Stage 1 comprehensive master report
+Stage 1,Master Manifest,stage1_manifest.json,True,1,Stage 1 machine-readable manifest

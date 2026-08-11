@@ -1,0 +1,9 @@
+{
+    "stage": "Stage 1E",
+    "worst_sample": "002693.npy",
+    "worst_psnr": 0.5883,
+    "best_sample": "001579.npy",
+    "best_psnr": 18.9313,
+    "median_sample": "003160.npy",
+    "median_psnr": 6.1929
+}

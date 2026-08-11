@@ -1,0 +1,4 @@
+Stage 1A Data Verification & Baseline Audit Report
+Samples: 320
+Mean PSNR: 7.0608 dB
+Mean SSIM: 0.0294

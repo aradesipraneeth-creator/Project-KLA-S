@@ -1,0 +1,32 @@
+{
+    "model_version": "AIR-Net-v1",
+    "total_parameters": 7285399,
+    "trainable_parameters": 7285399,
+    "in_channels": 1,
+    "out_channels": 1,
+    "dim": 32,
+    "channels": [
+        32,
+        64,
+        128,
+        192
+    ],
+    "heads": [
+        1,
+        2,
+        4,
+        6
+    ],
+    "enc_blocks": [
+        2,
+        2,
+        4
+    ],
+    "latent_blocks": 8,
+    "dec_blocks": [
+        4,
+        2,
+        2
+    ],
+    "ffn_expansion_factor": 2.66
+}

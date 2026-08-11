@@ -1,0 +1,11 @@
+====================================================
+AUTHORITATIVE VALIDATION SPLIT RECONSTRUCTION REPORT
+====================================================
+Total Dataset Samples:   3200
+Training Split Basis:    2880
+Validation Split Basis:  320
+Random Seed:             42
+Validation Mapping CSV:  C:\Users\arade\OneDrive\Documents\KLA Project S\outputs\stage1\stage1_reconstruction\authoritative_validation_mapping.csv
+SHA-256 Fingerprint:     d3c8c112fb5a0b48f95b2557b68d133902ac3a1f36487b990b14717f70fa2434
+Status:                  VERIFIED DETERMINISTIC & UNIQUE
+====================================================

@@ -1,0 +1,5 @@
+{
+    "stage": "Stage 1C",
+    "mean_edge_mae_airnet": 0.261786,
+    "mean_edge_mae_bicubic": 0.271571
+}
