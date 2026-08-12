@@ -14,7 +14,7 @@ except ImportError:
 
 class HighFrequencyLoss(nn.Module):
     """
-    High-Frequency Loss for AIR-Net v1.2:
+    High-Frequency Loss for AIR-Net v2:
         HF(x) = x - GaussianBlur(x, kernel_size=5, sigma=1.0)
         Loss = mean(|HF(pred) - HF(target)|)
     Operates strictly in Float32 to prevent HalfTensor/FloatTensor AMP errors.
@@ -44,6 +44,81 @@ class HighFrequencyLoss(nn.Module):
         hf_t = t_f - blur_t
         
         return F.l1_loss(hf_p, hf_t)
+
+
+class AIRNetV2Loss(nn.Module):
+    """
+    Multi-Objective AIR-Net v2 Loss Function:
+        Total Loss = 0.70 * L1 + 0.20 * (1.0 - SSIM) + 0.05 * EdgeLoss + 0.05 * HFLoss
+    
+    Prioritizes Pixel Fidelity (PSNR >= 25 dB) while enforcing structural & high-frequency detail.
+    """
+    def __init__(
+        self,
+        l1_weight: float = 0.70,
+        ssim_weight: float = 0.20,
+        edge_weight: float = 0.05,
+        hf_weight: float = 0.05,
+        data_range: float = 1.0
+    ):
+        super().__init__()
+        self.l1_weight = l1_weight
+        self.ssim_weight = ssim_weight
+        self.edge_weight = edge_weight
+        self.hf_weight = hf_weight
+        self.data_range = data_range
+
+        self.l1_loss = nn.L1Loss()
+        self.hf_loss_fn = HighFrequencyLoss(kernel_size=5, sigma=1.0)
+
+    def forward(
+        self,
+        pred: Union[torch.Tensor, Dict[str, Any]],
+        target: torch.Tensor
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        if isinstance(pred, dict):
+            restored_pred = pred["restored"]
+            edge_pred = pred.get("edge", None)
+        else:
+            restored_pred = pred
+            edge_pred = None
+
+        p_f = restored_pred.float()
+        t_f = target.float()
+
+        # 1. Pixel Fidelity Loss (Float32)
+        loss_l1 = self.l1_loss(p_f, t_f)
+
+        # 2. Structural Fidelity Loss (Float32)
+        if HAS_PYTORCH_MSSSIM:
+            ssim_val = ssim_fn(p_f, t_f, data_range=self.data_range, size_average=True)
+        else:
+            calc = FallbackSSIM(window_size=11, channel=1, data_range=self.data_range)
+            ssim_val = calc(p_f, t_f)
+        loss_ssim = 1.0 - ssim_val
+
+        # 3. Edge Reconstruction Loss (Float32)
+        if edge_pred is not None:
+            gt_edges = compute_sobel_edges(t_f)
+            loss_edge = self.l1_loss(edge_pred.float(), gt_edges.float())
+        else:
+            loss_edge = torch.tensor(0.0, device=target.device)
+
+        # 4. High-Frequency Detail Loss (Float32)
+        loss_hf = self.hf_loss_fn(p_f, t_f)
+
+        total_loss = (
+            self.l1_weight * loss_l1 +
+            self.ssim_weight * loss_ssim +
+            self.edge_weight * loss_edge +
+            self.hf_weight * loss_hf
+        )
+        return total_loss, {
+            "l1": loss_l1.item(),
+            "ssim_loss": loss_ssim.item(),
+            "edge": loss_edge.item(),
+            "hf": loss_hf.item()
+        }
 
 
 class AIRNetV12Loss(nn.Module):
@@ -84,10 +159,8 @@ class AIRNetV12Loss(nn.Module):
         p_f = restored_pred.float()
         t_f = target.float()
 
-        # 1. L1 Pixel Loss (Float32)
         loss_l1 = self.l1_loss(p_f, t_f)
 
-        # 2. SSIM Structural Loss (Float32)
         if HAS_PYTORCH_MSSSIM:
             ssim_val = ssim_fn(p_f, t_f, data_range=self.data_range, size_average=True)
         else:
@@ -95,14 +168,12 @@ class AIRNetV12Loss(nn.Module):
             ssim_val = calc(p_f, t_f)
         loss_ssim = 1.0 - ssim_val
 
-        # 3. Edge Loss (Float32)
         if edge_pred is not None:
             gt_edges = compute_sobel_edges(t_f)
             loss_edge = self.l1_loss(edge_pred.float(), gt_edges.float())
         else:
             loss_edge = torch.tensor(0.0, device=target.device)
 
-        # 4. High-Frequency Loss (Float32)
         loss_hf = self.hf_loss_fn(p_f, t_f)
 
         total_loss = (
@@ -129,18 +200,13 @@ class AIRNetHybridLoss(nn.Module):
         l1_weight: float = 0.60,
         ssim_weight: float = 0.25,
         edge_weight: float = 0.15,
-        lpips_weight: float = 0.0,
-        use_lpips: bool = False,
         data_range: float = 1.0
     ):
         super().__init__()
         self.l1_weight = l1_weight
         self.ssim_weight = ssim_weight
         self.edge_weight = edge_weight
-        self.lpips_weight = lpips_weight
-        self.use_lpips = use_lpips
         self.data_range = data_range
-
         self.l1_loss = nn.L1Loss()
 
     def forward(
@@ -183,10 +249,6 @@ class AIRNetHybridLoss(nn.Module):
 
 
 class FallbackSSIM(nn.Module):
-    """
-    Fallback SSIM module when pytorch-msssim is unavailable.
-    Includes AMP dtype & device matching to prevent HalfTensor/FloatTensor mismatch errors.
-    """
     def __init__(self, window_size: int = 11, channel: int = 1, data_range: float = 1.0):
         super().__init__()
         self.window_size = window_size

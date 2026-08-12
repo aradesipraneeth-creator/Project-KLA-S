@@ -5,25 +5,23 @@ import pandas as pd
 import torch
 import streamlit as st
 import matplotlib.pyplot as plt
-from scipy.ndimage import sobel, laplace, gaussian_filter, zoom
+from scipy.ndimage import gaussian_filter, zoom
 
 from configs.config import Config
 from models.airnet import AIRNet
+from models.airnet_v2 import AIRNetV2
 from utils.edge_utils import compute_sobel_edges
 
-# --- Synchronize Streamlit Dashboard with Project Config (AIR-Net v1.2) ---
-config = Config(MODEL_VERSION="AIR-Net-v1.2")
+config = Config(MODEL_VERSION="AIR-Net-v2")
 config.create_dirs()
 
-# Set Streamlit Page Configuration
 st.set_page_config(
-    page_title="KLA Semiconductor AIR-Net v1.2 Viewer",
+    page_title="KLA Semiconductor AIR-Net v2 Multi-Objective Restoration Viewer",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom Styling
 st.markdown("""
     <style>
     .main {
@@ -49,17 +47,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-
-# --- Cached AIR-Net PyTorch Model Loader ---
 @st.cache_resource
-def load_airnet_model():
-    """
-    Instantiates AIRNet model using project Config and loads checkpoint if available.
-    """
+def load_all_airnet_models():
     from utils.device import get_device
     device = get_device()
-    
-    model = AIRNet(
+
+    v2_model = AIRNetV2(
         in_channels=config.in_channels,
         out_channels=config.out_channels,
         dim=config.dim,
@@ -68,89 +61,54 @@ def load_airnet_model():
         enc_blocks=config.enc_blocks,
         latent_blocks=config.latent_blocks,
         dec_blocks=config.dec_blocks,
-        ffn_expansion_factor=config.ffn_expansion_factor
+        ffn_expansion_factor=config.ffn_expansion_factor,
+        use_residual_learning=True
     ).to(device)
 
-    checkpoint_dir = config.checkpoint_dir
-    checkpoints_to_check = [
-        ("airnet_v1_2_ema_best_model.pth", os.path.join(checkpoint_dir, "airnet_v1_2_ema_best_model.pth")),
-        ("airnet_v1_2_best_model.pth", os.path.join(checkpoint_dir, "airnet_v1_2_best_model.pth")),
-        ("airnet_v1_1_ema_best_model.pth", os.path.join("outputs", "v1_1", "checkpoints", "airnet_v1_1_ema_best_model.pth")),
-        ("airnet_ema_best_model.pth", os.path.join("outputs", "checkpoints", "airnet_ema_best_model.pth")),
-        ("ema_best_model.pth", os.path.join(checkpoint_dir, "ema_best_model.pth")),
-        ("best_model.pth", os.path.join(checkpoint_dir, "best_model.pth")),
-        ("last_model.pth", os.path.join(checkpoint_dir, "last_model.pth"))
-    ]
+    v2_ckpt = os.path.join("outputs", "v2", "checkpoints", "airnet_v2_ema_best_model.pth")
+    v2_loaded = False
+    if os.path.exists(v2_ckpt):
+        try:
+            state_dict = torch.load(v2_ckpt, map_location=device)
+            v2_model.load_state_dict(state_dict.get("ema_state_dict", state_dict), strict=False)
+            v2_loaded = True
+        except Exception as e:
+            print(f"Notice loading v2 checkpoint: {e}")
+    v2_model.eval()
 
-    loaded_checkpoint_name = None
-    for name, path in checkpoints_to_check:
-        if os.path.exists(path):
-            try:
-                state_dict = torch.load(path, map_location=device)
-                if 'ema_state_dict' in state_dict:
-                    state_dict = state_dict['ema_state_dict']
-                elif 'model_state_dict' in state_dict:
-                    state_dict = state_dict['model_state_dict']
-                
-                model.load_state_dict(state_dict, strict=False)
-                loaded_checkpoint_name = name
-                break
-            except Exception as e:
-                print(f"Notice loading checkpoint {path}: {e}")
+    v12_model = AIRNet(in_channels=1, out_channels=1).to(device)
+    v12_ckpt = os.path.join("outputs", "stage3", "checkpoints", "airnet_v1_2_ema_best_model.pth")
+    v12_loaded = False
+    if os.path.exists(v12_ckpt):
+        try:
+            state_dict = torch.load(v12_ckpt, map_location=device)
+            v12_model.load_state_dict(state_dict.get("ema_state_dict", state_dict), strict=False)
+            v12_loaded = True
+        except Exception as e:
+            print(f"Notice loading v1.2 checkpoint: {e}")
+    v12_model.eval()
 
-    model.eval()
-
-    num_params = sum(p.numel() for p in model.parameters())
-    print("====================================================")
-    print("STREAMLIT DASHBOARD STARTUP VERIFICATION:")
-    print(f"  [OK] AIR-Net configuration loaded ({config.MODEL_VERSION})")
-    print(f"  [OK] AIR-Net model instantiated ({num_params:,} parameters)")
-    print(f"  [OK] Checkpoint loaded ({loaded_checkpoint_name or 'Initialized Weights'})")
-    print("  [OK] Dashboard ready")
-    print("====================================================")
-
-    return model, device, loaded_checkpoint_name
-
-
-def run_airnet_inference(model, device, lr_arr: np.ndarray):
-    """
-    Runs live PyTorch inference using AIR-Net on a 2D LR array (128x128).
-    Returns dict containing 2D restored array, 2D edge map, and float degradation scores.
-    """
-    if lr_arr.ndim == 2:
-        lr_tensor = torch.from_numpy(lr_arr).unsqueeze(0).unsqueeze(0).to(device)
-    elif lr_arr.ndim == 3:
-        lr_tensor = torch.from_numpy(lr_arr).unsqueeze(0).to(device)
-    else:
-        lr_tensor = torch.from_numpy(lr_arr).to(device)
-
-    with torch.no_grad():
-        out_dict = model(lr_tensor)
-
-    restored_arr = torch.clamp(out_dict["restored"], 0.0, 1.0).squeeze().cpu().numpy().astype(np.float32)
-    edge_arr = torch.clamp(out_dict["edge"], 0.0, 1.0).squeeze().cpu().numpy().astype(np.float32)
-    noise_score = float(out_dict["noise"].item())
-    blur_score = float(out_dict["blur"].item())
-    texture_score = float(out_dict["texture"].item())
+    v1_model = AIRNet(in_channels=1, out_channels=1).to(device)
+    v1_ckpt = os.path.join("outputs", "checkpoints", "airnet_ema_best_model.pth")
+    v1_loaded = False
+    if os.path.exists(v1_ckpt):
+        try:
+            state_dict = torch.load(v1_ckpt, map_location=device)
+            v1_model.load_state_dict(state_dict.get("ema_state_dict", state_dict), strict=False)
+            v1_loaded = True
+        except Exception as e:
+            print(f"Notice loading v1 checkpoint: {e}")
+    v1_model.eval()
 
     return {
-        "restored": restored_arr,
-        "edge": edge_arr,
-        "noise": noise_score,
-        "blur": blur_score,
-        "texture": texture_score
+        "v2_model": v2_model, "v2_loaded": v2_loaded,
+        "v12_model": v12_model, "v12_loaded": v12_loaded,
+        "v1_model": v1_model, "v1_loaded": v1_loaded,
+        "device": device
     }
 
-
-# --- Helper Metrics Functions ---
 def compute_mse(pred: np.ndarray, gt: np.ndarray) -> float:
     return float(np.mean((pred - gt) ** 2))
-
-def compute_mae(pred: np.ndarray, gt: np.ndarray) -> float:
-    return float(np.mean(np.abs(pred - gt)))
-
-def compute_rmse(pred: np.ndarray, gt: np.ndarray) -> float:
-    return float(np.sqrt(compute_mse(pred, gt)))
 
 def compute_psnr(pred: np.ndarray, gt: np.ndarray, data_range: float = 1.0) -> float:
     mse = compute_mse(pred, gt)
@@ -176,219 +134,150 @@ def resize_bicubic(lr_img: np.ndarray, target_shape=(256, 256)) -> np.ndarray:
     bicubic = zoom(lr_img, zoom_factors, order=3)
     return np.clip(bicubic, 0.0, 1.0)
 
+st.title("🔬 KLA Semiconductor AIR-Net v2 Viewer")
+st.caption("Multi-Objective High-Fidelity Semiconductor Image Restoration Dashboard")
 
-# --- Application Header ---
-st.title("🔬 KLA Semiconductor AIR-Net Viewer")
-st.caption(f"Adaptive Image Restoration Network ({config.MODEL_VERSION}) Evaluation & Degradation Diagnostics")
-
-# --- Load AIR-Net Model ---
 try:
-    airnet_model, exec_device, loaded_ckpt_name = load_airnet_model()
-    if loaded_ckpt_name:
-        ckpt_status_msg = f"✅ Loaded checkpoint: `{loaded_checkpoint_name}` ({exec_device.type.upper()})"
-    else:
-        ckpt_status_msg = f"⚠️ No trained checkpoint found. Using initialized AIR-Net weights."
+    models_dict = load_all_airnet_models()
+    device = models_dict["device"]
+    ckpt_msg = f"✅ AIR-Net v2 Loaded: `{models_dict['v2_loaded']}` | v1.2: `{models_dict['v12_loaded']}` | v1: `{models_dict['v1_loaded']}` ({device.type.upper()})"
 except Exception as e:
-    st.error(f"Error initializing AIR-Net PyTorch model:")
-    st.exception(e)
-    airnet_model, exec_device, loaded_ckpt_name = None, torch.device("cpu"), None
-    ckpt_status_msg = f"❌ Model initialization error: {e}"
+    st.error(f"Error loading PyTorch models: {e}")
+    models_dict = None
+    ckpt_msg = f"❌ Error loading models: {e}"
 
-# --- Sidebar Controls ---
 st.sidebar.header("📁 Data Source Selection")
-st.sidebar.markdown(ckpt_status_msg)
+st.sidebar.markdown(ckpt_msg)
 
-source_mode = st.sidebar.radio("Select Input Source:", ["Training/Test Dataset Browser", "Validation Predictions Browser", "Manual File Upload"])
+source_mode = st.sidebar.radio("Select Input Source:", ["Dataset Browser", "Manual 128x128 File Upload"])
 
-lr_array, gt_array, pred_array, edge_array = None, None, None, None
-noise_val, blur_val, texture_val = 0.0, 0.0, 0.0
+lr_array, gt_array = None, None
 selected_sample_name = "N/A"
 
-outputs_dir = config.output_dir
 train_lr_dir = config.train_lr_dir
 train_gt_dir = config.train_gt_dir
-test_lr_dir = config.test_lr_dir
 
-if source_mode == "Training/Test Dataset Browser":
-    browser_folder = st.sidebar.selectbox("Select Dataset Folder:", ["Train/train (NoisyLR + GT)", "Test_NoisyLR"])
-    if browser_folder == "Train/train (NoisyLR + GT)" and os.path.exists(train_lr_dir):
+if source_mode == "Dataset Browser":
+    if os.path.exists(train_lr_dir):
         lr_files = sorted([f for f in os.listdir(train_lr_dir) if f.endswith(".npy")])
         if lr_files:
-            selected_file = st.sidebar.selectbox("Select Sample File:", lr_files)
+            selected_file = st.sidebar.selectbox("Select Validation / Train Sample:", lr_files)
             selected_sample_name = selected_file
             lr_array = np.load(os.path.join(train_lr_dir, selected_file)).astype(np.float32)
             if os.path.exists(train_gt_dir):
                 gt_path = os.path.join(train_gt_dir, selected_file)
                 if os.path.exists(gt_path):
                     gt_array = np.load(gt_path).astype(np.float32)
-    elif browser_folder == "Test_NoisyLR" and os.path.exists(test_lr_dir):
-        test_files = sorted([f for f in os.listdir(test_lr_dir) if f.endswith(".npy")])
-        if test_files:
-            selected_file = st.sidebar.selectbox("Select Test Sample:", test_files)
-            selected_sample_name = selected_file
-            lr_array = np.load(os.path.join(test_lr_dir, selected_file)).astype(np.float32)
 
-elif source_mode == "Validation Predictions Browser":
-    val_preds_dir = os.path.join(outputs_dir, "validation_predictions")
-    if os.path.exists(val_preds_dir):
-        npy_files = sorted([f for f in os.listdir(val_preds_dir) if f.endswith(".npy")])
-        if npy_files:
-            selected_pred_file = st.sidebar.selectbox("Select Validation Prediction:", npy_files)
-            selected_sample_name = selected_pred_file
-            try:
-                from datasets.kla_dataset import get_train_val_datasets
-                _, val_ds = get_train_val_datasets(train_lr_dir=config.train_lr_dir, train_gt_dir=config.train_gt_dir, seed=config.seed)
-                parts = selected_pred_file.split("_")
-                sample_idx_num = int(parts[1]) - 1
-                if 0 <= sample_idx_num < len(val_ds):
-                    lr_t, gt_t, fname = val_ds[sample_idx_num]
-                    lr_array = lr_t.squeeze().numpy()
-                    gt_array = gt_t.squeeze().numpy()
-            except Exception as e:
-                st.sidebar.warning(f"Could not auto-match GT/LR: {e}")
-
-elif source_mode == "Manual File Upload":
-    uploaded_lr = st.sidebar.file_uploader("Upload LR (.npy)", type=["npy"])
-    uploaded_gt = st.sidebar.file_uploader("Upload Ground Truth (.npy)", type=["npy"])
+elif source_mode == "Manual 128x128 File Upload":
+    uploaded_lr = st.sidebar.file_uploader("Upload 128x128 Image (.npy, .png, .jpg)", type=["npy", "png", "jpg", "jpeg", "bmp", "tiff"])
+    uploaded_gt = st.sidebar.file_uploader("Upload Reference GT (.npy, .png)", type=["npy", "png", "jpg"])
     if uploaded_lr:
-        lr_array = np.load(uploaded_lr).astype(np.float32)
+        if uploaded_lr.name.endswith(".npy"):
+            lr_array = np.load(uploaded_lr).astype(np.float32)
+        else:
+            img = Image.open(uploaded_lr).convert("L")
+            lr_array = np.array(img, dtype=np.float32) / 255.0
         selected_sample_name = uploaded_lr.name
     if uploaded_gt:
-        gt_array = np.load(uploaded_gt).astype(np.float32)
+        if uploaded_gt.name.endswith(".npy"):
+            gt_array = np.load(uploaded_gt).astype(np.float32)
+        else:
+            img = Image.open(uploaded_gt).convert("L")
+            gt_array = np.array(img, dtype=np.float32) / 255.0
 
-
-# --- Squeeze 2D Shapes ---
 if lr_array is not None and lr_array.ndim > 2:
     lr_array = lr_array.squeeze()
 if gt_array is not None and gt_array.ndim > 2:
     gt_array = gt_array.squeeze()
 
+if lr_array is not None and models_dict is not None:
+    lr_tensor = torch.from_numpy(lr_array).unsqueeze(0).unsqueeze(0).to(device)
 
-# --- AIR-NET LIVE INFERENCE TRIGGER ---
-if lr_array is not None and airnet_model is not None:
-    try:
-        airnet_out = run_airnet_inference(airnet_model, exec_device, lr_array)
-        pred_array = airnet_out["restored"]
-        edge_array = airnet_out["edge"]
-        noise_val = airnet_out["noise"]
-        blur_val = airnet_out["blur"]
-        texture_val = airnet_out["texture"]
-    except Exception as e:
-        st.sidebar.error("AIR-Net Inference Error:")
-        st.sidebar.exception(e)
+    with torch.no_grad(), torch.inference_mode():
+        v2_out = models_dict["v2_model"](lr_tensor)
+        v2_pred = torch.clamp(v2_out["restored"], 0.0, 1.0).squeeze().cpu().numpy()
 
-# Bicubic baseline reference
-bicubic_array = resize_bicubic(lr_array, (256, 256)) if lr_array is not None else None
+        v12_out = models_dict["v12_model"](lr_tensor)
+        v12_pred = torch.clamp(v12_out["restored"], 0.0, 1.0).squeeze().cpu().numpy()
 
-# Fallback Preview if no data selected
-if lr_array is None:
-    st.info("💡 Select a sample from the sidebar to inspect AIR-Net predictions.")
-    np.random.seed(42)
-    lr_array = np.random.rand(128, 128).astype(np.float32)
-    gt_array = np.random.rand(256, 256).astype(np.float32)
-    if airnet_model is not None:
-        airnet_out = run_airnet_inference(airnet_model, exec_device, lr_array)
-        pred_array = airnet_out["restored"]
-        edge_array = airnet_out["edge"]
-        noise_val, blur_val, texture_val = airnet_out["noise"], airnet_out["blur"], airnet_out["texture"]
-    bicubic_array = resize_bicubic(lr_array, (256, 256))
-    selected_sample_name = "Demo Preview Sample"
+        v1_out = models_dict["v1_model"](lr_tensor)
+        v1_pred = torch.clamp(v1_out["restored"], 0.0, 1.0).squeeze().cpu().numpy()
 
+    bicubic_pred = resize_bicubic(lr_array, (256, 256))
 
-# --- SIDEBAR DEGRADATION SCORES PROGRESS BARS ---
-st.sidebar.markdown("---")
-st.sidebar.subheader("📊 Degradation Analyzer Scores")
+    st.subheader(f"Multi-Model Restoration Grid: {selected_sample_name}")
 
-st.sidebar.markdown(f"**Noise Score:** `{noise_val * 100:.1f}%`")
-st.sidebar.progress(min(max(noise_val, 0.0), 1.0))
-
-st.sidebar.markdown(f"**Blur Score:** `{blur_val * 100:.1f}%`")
-st.sidebar.progress(min(max(blur_val, 0.0), 1.0))
-
-st.sidebar.markdown(f"**Texture Complexity:** `{texture_val * 100:.1f}%`")
-st.sidebar.progress(min(max(texture_val, 0.0), 1.0))
-
-
-# --- MAIN LAYOUT 3 COLUMNS ---
-st.subheader(f"AIR-Net Live Output: {selected_sample_name}")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.markdown("### 1. Input Image (128x128)")
-    if lr_array is not None:
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("### 1. NoisyLR Input (128x128)")
         fig, ax = plt.subplots(figsize=(4, 4))
         ax.imshow(lr_array, cmap="gray")
         ax.axis("off")
         st.pyplot(fig)
-
-with col2:
-    st.markdown("### 2. Restored Image (256x256)")
-    if pred_array is not None:
+    with col2:
+        st.markdown("### 2. Bicubic Baseline (256x256)")
         fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(pred_array, cmap="gray", vmin=0, vmax=1)
+        ax.imshow(bicubic_pred, cmap="gray", vmin=0, vmax=1)
+        ax.axis("off")
+        st.pyplot(fig)
+    with col3:
+        st.markdown("### 3. AIR-Net v1 (256x256)")
+        fig, ax = plt.subplots(figsize=(4, 4))
+        ax.imshow(v1_pred, cmap="gray", vmin=0, vmax=1)
         ax.axis("off")
         st.pyplot(fig)
 
-with col3:
-    st.markdown("### 3. Predicted Edge Map (256x256)")
-    if edge_array is not None:
+    col4, col5, col6 = st.columns(3)
+    with col4:
+        st.markdown("### 4. AIR-Net v1.2 (256x256)")
         fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(edge_array, cmap="magma", vmin=0, vmax=1)
+        ax.imshow(v12_pred, cmap="gray", vmin=0, vmax=1)
         ax.axis("off")
         st.pyplot(fig)
-
-
-# --- TABS FOR EXPANDED ANALYSIS ---
-tab1, tab2, tab3 = st.tabs([
-    "🔍 Detailed Comparison & Error Heatmaps",
-    "📊 Quantitative Metrics & Statistics",
-    "📄 AIR-Net Reports & Metadata"
-])
-
-with tab1:
-    if pred_array is not None and gt_array is not None:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown("**Ground Truth (256x256)**")
-            fig, ax = plt.subplots()
+    with col5:
+        st.markdown("### 5. AIR-Net v2 (256x256)")
+        fig, ax = plt.subplots(figsize=(4, 4))
+        ax.imshow(v2_pred, cmap="gray", vmin=0, vmax=1)
+        ax.axis("off")
+        st.pyplot(fig)
+    with col6:
+        st.markdown("### 6. Ground Truth (256x256)" if gt_array is not None else "### 6. Ground Truth (N/A)")
+        if gt_array is not None:
+            fig, ax = plt.subplots(figsize=(4, 4))
             ax.imshow(gt_array, cmap="gray", vmin=0, vmax=1)
             ax.axis("off")
             st.pyplot(fig)
-        with c2:
-            st.markdown("**GT Sobel Edge Map**")
-            gt_edge_sobel = compute_sobel_edges(torch.from_numpy(gt_array).unsqueeze(0).unsqueeze(0)).squeeze().numpy()
-            fig, ax = plt.subplots()
-            ax.imshow(gt_edge_sobel, cmap="magma", vmin=0, vmax=1)
-            ax.axis("off")
-            st.pyplot(fig)
-        with c3:
-            st.markdown("**Absolute Error Map |Pred - GT|**")
-            abs_err = np.abs(pred_array - gt_array)
-            fig, ax = plt.subplots()
-            im = ax.imshow(abs_err, cmap="hot", vmin=0.0, vmax=0.25)
-            plt.colorbar(im, ax=ax)
-            ax.axis("off")
-            st.pyplot(fig)
+        else:
+            st.info("Upload reference GT to view ground truth comparison.")
 
-with tab2:
-    if pred_array is not None and gt_array is not None:
-        psnr_v = compute_psnr(pred_array, gt_array)
-        ssim_v = compute_ssim(pred_array, gt_array)
-        mse_v = compute_mse(pred_array, gt_array)
-        mae_v = compute_mae(pred_array, gt_array)
+    # Quantitative Metrics Table if GT is present
+    if gt_array is not None:
+        st.markdown("---")
+        st.subheader("📊 Quantitative Performance Metrics")
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("PSNR (dB)", f"{psnr_v:.4f} dB")
-        m2.metric("SSIM", f"{ssim_v:.4f}")
-        m3.metric("MSE", f"{mse_v:.6f}")
-        m4.metric("MAE", f"{mae_v:.6f}")
+        m_bic = {"PSNR (dB)": compute_psnr(bicubic_pred, gt_array), "SSIM": compute_ssim(bicubic_pred, gt_array)}
+        m_v1 = {"PSNR (dB)": compute_psnr(v1_pred, gt_array), "SSIM": compute_ssim(v1_pred, gt_array)}
+        m_v12 = {"PSNR (dB)": compute_psnr(v12_pred, gt_array), "SSIM": compute_ssim(v12_pred, gt_array)}
+        m_v2 = {"PSNR (dB)": compute_psnr(v2_pred, gt_array), "SSIM": compute_ssim(v2_pred, gt_array)}
 
-with tab3:
-    st.markdown("### 📋 Model Architecture & Summary")
-    summary_path = os.path.join(outputs_dir, "reports", "model_summary.txt")
-    if not os.path.exists(summary_path):
-        summary_path = os.path.join(outputs_dir, "model_summary.txt")
-    if os.path.exists(summary_path):
-        with open(summary_path) as f:
-            st.code(f.read(), language="text")
+        metrics_df = pd.DataFrame([
+            {"Model": "Bicubic 2x", "PSNR (dB)": f"{m_bic['PSNR (dB)']:.4f}", "SSIM": f"{m_bic['SSIM']:.4f}"},
+            {"Model": "AIR-Net v1", "PSNR (dB)": f"{m_v1['PSNR (dB)']:.4f}", "SSIM": f"{m_v1['SSIM']:.4f}"},
+            {"Model": "AIR-Net v1.2", "PSNR (dB)": f"{m_v12['PSNR (dB)']:.4f}", "SSIM": f"{m_v12['SSIM']:.4f}"},
+            {"Model": "AIR-Net v2", "PSNR (dB)": f"{m_v2['PSNR (dB)']:.4f}", "SSIM": f"{m_v2['SSIM']:.4f}"}
+        ])
+        st.table(metrics_df)
+
+        # Download Restored Image Button
+        buf_img = Image.fromarray((v2_pred * 255.0).round().astype(np.uint8))
+        buf_img.save("temp_restored_v2.png")
+        with open("temp_restored_v2.png", "rb") as file:
+            st.download_button(
+                label="⬇️ Download AIR-Net v2 Restored Image (256x256 PNG)",
+                data=file,
+                file_name=f"restored_v2_{selected_sample_name}.png",
+                mime="image/png"
+            )
+else:
+    st.info("💡 Select a sample from the sidebar to inspect AIR-Net v2 predictions.")
