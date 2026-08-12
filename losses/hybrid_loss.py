@@ -1,25 +1,128 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Union, Any
+from typing import Dict, Union, Any, Tuple
 
 from utils.edge_utils import compute_sobel_edges
 
 try:
     from pytorch_msssim import ssim as ssim_fn
     HAS_PYTORCH_MSSSIM = True
-    print("[OK] Using pytorch-msssim implementation.")
 except ImportError:
     HAS_PYTORCH_MSSSIM = False
-    print("[OK] Using internal FallbackSSIM implementation.")
+
+
+class HighFrequencyLoss(nn.Module):
+    """
+    High-Frequency Loss for AIR-Net v1.2:
+        HF(x) = x - GaussianBlur(x, kernel_size=5, sigma=1.0)
+        Loss = mean(|HF(pred) - HF(target)|)
+    Operates strictly in Float32 to prevent HalfTensor/FloatTensor AMP errors.
+    """
+    def __init__(self, kernel_size: int = 5, sigma: float = 1.0):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.sigma = sigma
+        self.register_buffer("kernel", self._create_gaussian_kernel(kernel_size, sigma))
+
+    def _create_gaussian_kernel(self, kernel_size: int, sigma: float) -> torch.Tensor:
+        coords = torch.arange(kernel_size, dtype=torch.float32) - (kernel_size - 1) / 2.0
+        g1d = torch.exp(-coords**2 / (2 * sigma**2))
+        g1d = g1d / g1d.sum()
+        g2d = g1d.unsqueeze(1) @ g1d.unsqueeze(0)
+        return g2d.view(1, 1, kernel_size, kernel_size)
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        p_f = pred.float()
+        t_f = target.float()
+        kernel = self.kernel.to(device=p_f.device, dtype=torch.float32)
+        
+        blur_p = F.conv2d(p_f, kernel, padding=self.kernel_size // 2)
+        blur_t = F.conv2d(t_f, kernel, padding=self.kernel_size // 2)
+        
+        hf_p = p_f - blur_p
+        hf_t = t_f - blur_t
+        
+        return F.l1_loss(hf_p, hf_t)
+
+
+class AIRNetV12Loss(nn.Module):
+    """
+    Controlled AIR-Net v1.2 Loss Function:
+        Total Loss = 0.50 * L1 + 0.20 * (1.0 - SSIM) + 0.15 * EdgeLoss + 0.15 * HFLoss
+    """
+    def __init__(
+        self,
+        l1_weight: float = 0.50,
+        ssim_weight: float = 0.20,
+        edge_weight: float = 0.15,
+        hf_weight: float = 0.15,
+        data_range: float = 1.0
+    ):
+        super().__init__()
+        self.l1_weight = l1_weight
+        self.ssim_weight = ssim_weight
+        self.edge_weight = edge_weight
+        self.hf_weight = hf_weight
+        self.data_range = data_range
+
+        self.l1_loss = nn.L1Loss()
+        self.hf_loss_fn = HighFrequencyLoss(kernel_size=5, sigma=1.0)
+
+    def forward(
+        self,
+        pred: Union[torch.Tensor, Dict[str, Any]],
+        target: torch.Tensor
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        if isinstance(pred, dict):
+            restored_pred = pred["restored"]
+            edge_pred = pred.get("edge", None)
+        else:
+            restored_pred = pred
+            edge_pred = None
+
+        p_f = restored_pred.float()
+        t_f = target.float()
+
+        # 1. L1 Pixel Loss (Float32)
+        loss_l1 = self.l1_loss(p_f, t_f)
+
+        # 2. SSIM Structural Loss (Float32)
+        if HAS_PYTORCH_MSSSIM:
+            ssim_val = ssim_fn(p_f, t_f, data_range=self.data_range, size_average=True)
+        else:
+            calc = FallbackSSIM(window_size=11, channel=1, data_range=self.data_range)
+            ssim_val = calc(p_f, t_f)
+        loss_ssim = 1.0 - ssim_val
+
+        # 3. Edge Loss (Float32)
+        if edge_pred is not None:
+            gt_edges = compute_sobel_edges(t_f)
+            loss_edge = self.l1_loss(edge_pred.float(), gt_edges.float())
+        else:
+            loss_edge = torch.tensor(0.0, device=target.device)
+
+        # 4. High-Frequency Loss (Float32)
+        loss_hf = self.hf_loss_fn(p_f, t_f)
+
+        total_loss = (
+            self.l1_weight * loss_l1 +
+            self.ssim_weight * loss_ssim +
+            self.edge_weight * loss_edge +
+            self.hf_weight * loss_hf
+        )
+        return total_loss, {
+            "l1": loss_l1.item(),
+            "ssim_loss": loss_ssim.item(),
+            "edge": loss_edge.item(),
+            "hf": loss_hf.item()
+        }
 
 
 class AIRNetHybridLoss(nn.Module):
     """
     Hybrid Loss function for AIR-Net v1:
         Loss = 0.60 * L1 + 0.25 * (1.0 - SSIM) + 0.15 * EdgeLoss
-    
-    Optional LPIPS flag available (use_lpips=False by default).
     """
     def __init__(
         self,
@@ -39,31 +142,12 @@ class AIRNetHybridLoss(nn.Module):
         self.data_range = data_range
 
         self.l1_loss = nn.L1Loss()
-        
-        if use_lpips:
-            try:
-                import lpips
-                self.lpips_fn = lpips.LPIPS(net='alex')
-            except Exception:
-                self.use_lpips = False
-                self.lpips_fn = None
-        else:
-            self.lpips_fn = None
 
     def forward(
         self,
         pred: Union[torch.Tensor, Dict[str, Any]],
         target: torch.Tensor
     ) -> torch.Tensor:
-        """
-        Args:
-            pred: Either a tensor (B, 1, 256, 256) or dict from AIRNet containing:
-                  "restored": (B, 1, 256, 256)
-                  "edge": (B, 1, 256, 256)
-            target: GT image tensor of shape (B, 1, 256, 256)
-        Returns:
-            torch.Tensor: Scalar weighted total loss
-        """
         if isinstance(pred, dict):
             restored_pred = pred["restored"]
             edge_pred = pred.get("edge", None)
@@ -71,44 +155,31 @@ class AIRNetHybridLoss(nn.Module):
             restored_pred = pred
             edge_pred = None
 
-        # 1. L1 Pixel Fidelity Loss
-        loss_l1 = self.l1_loss(restored_pred, target)
+        p_f = restored_pred.float()
+        t_f = target.float()
 
-        # 2. SSIM Structural Loss
+        loss_l1 = self.l1_loss(p_f, t_f)
+
         if HAS_PYTORCH_MSSSIM:
-            ssim_val = ssim_fn(restored_pred, target, data_range=self.data_range, size_average=True)
+            ssim_val = ssim_fn(p_f, t_f, data_range=self.data_range, size_average=True)
         else:
-            # Fallback SSIM calculation with AMP dtype compatibility
-            from losses.hybrid_loss import FallbackSSIM
             calc = FallbackSSIM(window_size=11, channel=1, data_range=self.data_range)
-            ssim_val = calc(restored_pred, target)
+            ssim_val = calc(p_f, t_f)
             
         loss_ssim = 1.0 - ssim_val
 
-        # 3. Edge Reconstruction Loss
         if edge_pred is not None:
-            gt_edges = compute_sobel_edges(target)
-            loss_edge = self.l1_loss(edge_pred, gt_edges)
+            gt_edges = compute_sobel_edges(t_f)
+            loss_edge = self.l1_loss(edge_pred.float(), gt_edges.float())
         else:
             loss_edge = torch.tensor(0.0, device=target.device)
-
-        # 4. Optional LPIPS Perceptual Loss
-        loss_lpips = torch.tensor(0.0, device=target.device)
-        if self.use_lpips and self.lpips_fn is not None:
-            restored_3ch = restored_pred.repeat(1, 3, 1, 1) * 2.0 - 1.0
-            target_3ch = target.repeat(1, 3, 1, 1) * 2.0 - 1.0
-            loss_lpips = self.lpips_fn(restored_3ch, target_3ch).mean()
 
         total_loss = (
             self.l1_weight * loss_l1 +
             self.ssim_weight * loss_ssim +
-            self.edge_weight * loss_edge +
-            self.lpips_weight * loss_lpips
+            self.edge_weight * loss_edge
         )
         return total_loss
-
-# Alias for backward compatibility
-HybridLoss = AIRNetHybridLoss
 
 
 class FallbackSSIM(nn.Module):
@@ -136,19 +207,24 @@ class FallbackSSIM(nn.Module):
         c1 = (0.01 * self.data_range) ** 2
         c2 = (0.03 * self.data_range) ** 2
 
-        # Create local window matching target device and dtype (AMP HalfTensor / FloatTensor compatible)
-        window = self.window.to(device=img1.device, dtype=img1.dtype)
+        img1_f = img1.float()
+        img2_f = img2.float()
 
-        mu1 = F.conv2d(img1, window, padding=self.window_size // 2, groups=self.channel)
-        mu2 = F.conv2d(img2, window, padding=self.window_size // 2, groups=self.channel)
+        window = self.window.to(device=img1_f.device, dtype=torch.float32)
+
+        mu1 = F.conv2d(img1_f, window, padding=self.window_size // 2, groups=self.channel)
+        mu2 = F.conv2d(img2_f, window, padding=self.window_size // 2, groups=self.channel)
 
         mu1_sq = mu1.pow(2)
         mu2_sq = mu2.pow(2)
         mu1_mu2 = mu1 * mu2
 
-        sigma1_sq = F.conv2d(img1 * img1, window, padding=self.window_size // 2, groups=self.channel) - mu1_sq
-        sigma2_sq = F.conv2d(img2 * img2, window, padding=self.window_size // 2, groups=self.channel) - mu2_sq
-        sigma12 = F.conv2d(img1 * img2, window, padding=self.window_size // 2, groups=self.channel) - mu1_mu2
+        sigma1_sq = F.conv2d(img1_f * img1_f, window, padding=self.window_size // 2, groups=self.channel) - mu1_sq
+        sigma2_sq = F.conv2d(img2_f * img2_f, window, padding=self.window_size // 2, groups=self.channel) - mu2_sq
+        sigma12 = F.conv2d(img1_f * img2_f, window, padding=self.window_size // 2, groups=self.channel) - mu1_mu2
 
         ssim_map = ((2 * mu1_mu2 + c1) * (2 * sigma12 + c2)) / ((mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2))
         return ssim_map.mean()
+
+
+HybridLoss = AIRNetHybridLoss
