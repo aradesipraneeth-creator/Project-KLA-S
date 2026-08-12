@@ -1,10 +1,11 @@
+from models.airnet import AIRNet
+from configs.config import Config
+import torch
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import torch
-from configs.config import Config
-from models.airnet import AIRNet
 
 def generate_model_summary(config: Config = None, model: torch.nn.Module = None) -> str:
     """
@@ -26,7 +27,7 @@ def generate_model_summary(config: Config = None, model: torch.nn.Module = None)
             enc_blocks=config.enc_blocks,
             latent_blocks=config.latent_blocks,
             dec_blocks=config.dec_blocks,
-            ffn_expansion_factor=config.ffn_expansion_factor
+            ffn_expansion_factor=config.ffn_expansion_factor,
         )
 
     model.eval()
@@ -40,14 +41,16 @@ def generate_model_summary(config: Config = None, model: torch.nn.Module = None)
     with torch.no_grad():
         out_dict = model(dummy_input)
 
-    output_shapes_str = "\n".join([
-        f"   - {k:<10}: {tuple(v.shape)}" for k, v in out_dict.items()
-    ])
+    output_shapes_str = "\n".join(
+        [f"   - {k:<10}: {tuple(v.shape)}" for k, v in out_dict.items()]
+    )
 
     module_breakdown_lines = []
     for name, module in model.named_children():
         mod_params = sum(p.numel() for p in module.parameters())
-        module_breakdown_lines.append(f"   - {name:<25}: {mod_params:,} params ({mod_params / 1e6:.3f} M)")
+        module_breakdown_lines.append(
+            f"   - {name:<25}: {mod_params:,} params ({mod_params / 1e6:.3f} M)"
+        )
 
     module_breakdown_str = "\n".join(module_breakdown_lines)
 
@@ -71,8 +74,11 @@ def generate_model_summary(config: Config = None, model: torch.nn.Module = None)
     with open(config.model_summary_file, "w") as f:
         f.write(report)
 
-    print(f"AIR-Net v1 model summary generated and saved to {config.model_summary_file}")
+    print(
+        f"AIR-Net v1 model summary generated and saved to {config.model_summary_file}"
+    )
     return report
+
 
 if __name__ == "__main__":
     print(generate_model_summary())

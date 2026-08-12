@@ -1,0 +1,4 @@
+epoch,train_loss,val_loss,psnr,ssim,learning_rate,gpu_allocated_mb,gpu_reserved_mb,gpu_peak_mb,images_per_second,batches_per_second
+1,0.54321,0.4321,28.5,0.85,2.000000e-04,1200.5,2048.0,1500.0,142.5,35.6
+2,0.44321,0.3321,29.1,0.87,1.500000e-04,1210.0,2048.0,1600.0,0.0,0.0
+3,0.34321,0.2321,30.2,0.89,1.000000e-04,1220.0,2048.0,1650.0,0.0,0.0

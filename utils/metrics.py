@@ -4,11 +4,15 @@ import numpy as np
 
 try:
     from pytorch_msssim import ssim as ssim_fn
+
     HAS_PYTORCH_MSSSIM = True
 except ImportError:
     HAS_PYTORCH_MSSSIM = False
 
-def calculate_psnr(pred: torch.Tensor, target: torch.Tensor, data_range: float = 1.0) -> float:
+
+def calculate_psnr(
+    pred: torch.Tensor, target: torch.Tensor, data_range: float = 1.0
+) -> float:
     """
     Calculates Peak Signal-to-Noise Ratio (PSNR) between prediction and ground truth.
     Evaluated in FP32 precision.
@@ -22,13 +26,15 @@ def calculate_psnr(pred: torch.Tensor, target: torch.Tensor, data_range: float =
     pred_f = pred.float()
     target_f = target.float()
 
-    mse = F.mse_loss(pred_f, target_f, reduction='none').mean(dim=[1, 2, 3])
+    mse = F.mse_loss(pred_f, target_f, reduction="none").mean(dim=[1, 2, 3])
     mse = torch.clamp(mse, min=1e-10)
-    psnr = 10.0 * torch.log10((data_range ** 2) / mse)
+    psnr = 10.0 * torch.log10((data_range**2) / mse)
     return psnr.mean().item()
 
 
-def calculate_ssim(pred: torch.Tensor, target: torch.Tensor, data_range: float = 1.0) -> float:
+def calculate_ssim(
+    pred: torch.Tensor, target: torch.Tensor, data_range: float = 1.0
+) -> float:
     """
     Calculates Structural Similarity Index (SSIM) between prediction and ground truth.
     Evaluated in FP32 precision.
@@ -49,5 +55,6 @@ def calculate_ssim(pred: torch.Tensor, target: torch.Tensor, data_range: float =
     else:
         # Fallback SSIM calculation
         from losses.hybrid_loss import FallbackSSIM
+
         calc = FallbackSSIM(window_size=11, channel=1, data_range=data_range)
         return calc(pred_f, target_f).item()

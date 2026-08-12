@@ -40,10 +40,7 @@ edge_densities = []
 worst_psnr = []
 worst_ssim = []
 
-all_files = sorted(
-    [f for f in os.listdir(GT_FOLDER)
-     if f.endswith(".npy")]
-)
+all_files = sorted([f for f in os.listdir(GT_FOLDER) if f.endswith(".npy")])
 
 print("Processing", len(all_files), "training samples...")
 
@@ -57,22 +54,18 @@ for idx, f in enumerate(all_files):
     # ==========================================
 
     gt_sum += gt.sum()
-    gt_sq_sum += (gt ** 2).sum()
+    gt_sq_sum += (gt**2).sum()
     gt_pixels += gt.size
 
     lr_sum += lr.sum()
-    lr_sq_sum += (lr ** 2).sum()
+    lr_sq_sum += (lr**2).sum()
     lr_pixels += lr.size
 
     # ==========================================
     # Bicubic Upscale
     # ==========================================
 
-    lr_up = cv2.resize(
-        lr,
-        (256, 256),
-        interpolation=cv2.INTER_CUBIC
-    )
+    lr_up = cv2.resize(lr, (256, 256), interpolation=cv2.INTER_CUBIC)
 
     # ==========================================
     # PSNR
@@ -91,11 +84,7 @@ for idx, f in enumerate(all_files):
     # SSIM
     # ==========================================
 
-    ssim_score = ssim(
-        gt,
-        lr_up,
-        data_range=1.0
-    )
+    ssim_score = ssim(gt, lr_up, data_range=1.0)
 
     ssim_scores.append(ssim_score)
 
@@ -103,10 +92,7 @@ for idx, f in enumerate(all_files):
     # Correlation
     # ==========================================
 
-    corr = np.corrcoef(
-        gt.flatten(),
-        lr_up.flatten()
-    )[0, 1]
+    corr = np.corrcoef(gt.flatten(), lr_up.flatten())[0, 1]
 
     correlations.append(corr)
 
@@ -116,62 +102,37 @@ for idx, f in enumerate(all_files):
 
     residual = gt - lr_up
 
-    residual_values.append(
-        residual.flatten()
-    )
+    residual_values.append(residual.flatten())
 
-    noise_stds.append(
-        residual.std()
-    )
+    noise_stds.append(residual.std())
 
     # ==========================================
     # Entropy
     # ==========================================
 
-    hist, _ = np.histogram(
-        gt,
-        bins=256,
-        range=(0, 1),
-        density=True
-    )
+    hist, _ = np.histogram(gt, bins=256, range=(0, 1), density=True)
 
-    entropies.append(
-        entropy(hist + 1e-10)
-    )
+    entropies.append(entropy(hist + 1e-10))
 
     # ==========================================
     # Edge Density
     # ==========================================
 
-    gt_uint8 = np.clip(
-        gt * 255,
-        0,
-        255
-    ).astype(np.uint8)
+    gt_uint8 = np.clip(gt * 255, 0, 255).astype(np.uint8)
 
-    edges = cv2.Canny(
-        gt_uint8,
-        50,
-        150
-    )
+    edges = cv2.Canny(gt_uint8, 50, 150)
 
     edge_density = np.mean(edges > 0)
 
-    edge_densities.append(
-        edge_density
-    )
+    edge_densities.append(edge_density)
 
     # ==========================================
     # Worst Samples Tracking
     # ==========================================
 
-    worst_psnr.append(
-        (f, psnr)
-    )
+    worst_psnr.append((f, psnr))
 
-    worst_ssim.append(
-        (f, ssim_score)
-    )
+    worst_ssim.append((f, ssim_score))
 
     if (idx + 1) % 200 == 0:
         print(f"Processed {idx+1}/{len(all_files)}")
@@ -181,40 +142,23 @@ for idx, f in enumerate(all_files):
 # =====================================================
 
 gt_mean = gt_sum / gt_pixels
-gt_std = np.sqrt(
-    (gt_sq_sum / gt_pixels)
-    - gt_mean ** 2
-)
+gt_std = np.sqrt((gt_sq_sum / gt_pixels) - gt_mean**2)
 
 lr_mean = lr_sum / lr_pixels
-lr_std = np.sqrt(
-    (lr_sq_sum / lr_pixels)
-    - lr_mean ** 2
-)
+lr_std = np.sqrt((lr_sq_sum / lr_pixels) - lr_mean**2)
 
-residual_values = np.concatenate(
-    residual_values
-)
+residual_values = np.concatenate(residual_values)
 
-worst_psnr = sorted(
-    worst_psnr,
-    key=lambda x: x[1]
-)[:20]
+worst_psnr = sorted(worst_psnr, key=lambda x: x[1])[:20]
 
-worst_ssim = sorted(
-    worst_ssim,
-    key=lambda x: x[1]
-)[:20]
+worst_ssim = sorted(worst_ssim, key=lambda x: x[1])[:20]
 
 # =====================================================
 # TEST SET COUNT
 # =====================================================
 
 if os.path.exists(TEST_FOLDER):
-    test_count = len([
-        f for f in os.listdir(TEST_FOLDER)
-        if f.endswith(".npy")
-    ])
+    test_count = len([f for f in os.listdir(TEST_FOLDER) if f.endswith(".npy")])
 else:
     test_count = "Unknown"
 

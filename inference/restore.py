@@ -1,3 +1,6 @@
+from utils.device import get_device
+from models.airnet import AIRNet
+from configs.config import Config
 import os
 import sys
 import json
@@ -6,13 +9,12 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
-PROJECT_ROOT = os.environ.get("KLA_PROJECT_ROOT", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+PROJECT_ROOT = os.environ.get(
+    "KLA_PROJECT_ROOT", os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from configs.config import Config
-from models.airnet import AIRNet
-from utils.device import get_device
 
 def load_airnet_v1_2_model(device=None):
     if device is None:
@@ -27,27 +29,48 @@ def load_airnet_v1_2_model(device=None):
         enc_blocks=config.enc_blocks,
         latent_blocks=config.latent_blocks,
         dec_blocks=config.dec_blocks,
-        ffn_expansion_factor=config.ffn_expansion_factor
+        ffn_expansion_factor=config.ffn_expansion_factor,
     ).to(device)
 
     # Checkpoint resolution priority
     ckpt_candidates = [
-        os.path.join(PROJECT_ROOT, "outputs", "stage3", "checkpoints", "airnet_v1_2_ema_best_model.pth"),
-        os.path.join(PROJECT_ROOT, "outputs", "stage3", "checkpoints", "airnet_v1_2_best_model.pth"),
-        os.path.join(PROJECT_ROOT, "outputs", "v1_2", "checkpoints", "airnet_v1_2_ema_best_model.pth"),
+        os.path.join(
+            PROJECT_ROOT,
+            "outputs",
+            "stage3",
+            "checkpoints",
+            "airnet_v1_2_ema_best_model.pth",
+        ),
+        os.path.join(
+            PROJECT_ROOT,
+            "outputs",
+            "stage3",
+            "checkpoints",
+            "airnet_v1_2_best_model.pth",
+        ),
+        os.path.join(
+            PROJECT_ROOT,
+            "outputs",
+            "v1_2",
+            "checkpoints",
+            "airnet_v1_2_ema_best_model.pth",
+        ),
     ]
 
     loaded_path = None
     for cand in ckpt_candidates:
         if os.path.exists(cand) and "quarantine" not in cand:
             ckpt_data = torch.load(cand, map_location=device)
-            state_dict = ckpt_data.get("ema_state_dict", ckpt_data.get("model_state_dict", ckpt_data))
+            state_dict = ckpt_data.get(
+                "ema_state_dict", ckpt_data.get("model_state_dict", ckpt_data)
+            )
             model.load_state_dict(state_dict, strict=True)
             loaded_path = cand
             break
 
     model.eval()
     return model, loaded_path, device
+
 
 def restore_image(input_image_path_or_array, save_path=None):
     """
@@ -56,7 +79,7 @@ def restore_image(input_image_path_or_array, save_path=None):
       Output: 256x256 restored uint8 image array (and saved PNG if save_path provided)
     """
     model, loaded_ckpt, device = load_airnet_v1_2_model()
-    
+
     # 1. Load and Preprocess Input
     if isinstance(input_image_path_or_array, str):
         if input_image_path_or_array.endswith(".npy"):
@@ -69,15 +92,19 @@ def restore_image(input_image_path_or_array, save_path=None):
         if arr.max() > 1.0:
             arr = arr / 255.0
     else:
-        raise ValueError("Unsupported input format. Expected file path (str) or numpy array.")
+        raise ValueError(
+            "Unsupported input format. Expected file path (str) or numpy array."
+        )
 
     # Squeeze to 2D
     if arr.ndim == 3:
         arr = arr.squeeze()
-    
+
     h, w = arr.shape
     if h != 128 or w != 128:
-        raise ValueError(f"AIR-Net v1.2 strictly requires 128x128 input images, got {w}x{h}.")
+        raise ValueError(
+            f"AIR-Net v1.2 strictly requires 128x128 input images, got {w}x{h}."
+        )
 
     # 2. Tensor Prep
     img_tensor = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0).to(device)
@@ -89,7 +116,10 @@ def restore_image(input_image_path_or_array, save_path=None):
         pred_tensor = torch.clamp(pred_tensor, 0.0, 1.0)
 
     restored_np = pred_tensor.squeeze().cpu().numpy()
-    assert restored_np.shape == (256, 256), f"Expected 256x256 output, got {restored_np.shape}"
+    assert restored_np.shape == (
+        256,
+        256,
+    ), f"Expected 256x256 output, got {restored_np.shape}"
 
     restored_uint8 = (restored_np * 255.0).round().astype(np.uint8)
 
@@ -100,6 +130,7 @@ def restore_image(input_image_path_or_array, save_path=None):
 
     return restored_uint8, restored_np
 
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         inp_path = sys.argv[1]
@@ -107,4 +138,6 @@ if __name__ == "__main__":
         restore_image(inp_path, out_path)
         print("Status: RESTORATION SUCCESSFUL")
     else:
-        print("Usage: python inference/restore.py <path_to_128x128_image> [output_path]")
+        print(
+            "Usage: python inference/restore.py <path_to_128x128_image> [output_path]"
+        )

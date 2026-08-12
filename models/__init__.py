@@ -9,5 +9,5 @@ __all__ = [
     "DegradationAnalyzer",
     "AdaptiveFeatureModulation",
     "EdgeHead",
-    "AIRNet"
+    "AIRNet",
 ]

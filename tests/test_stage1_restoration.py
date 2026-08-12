@@ -1,3 +1,7 @@
+from utils.device import get_device
+from utils.metrics import calculate_psnr, calculate_ssim
+from models.airnet import AIRNet
+from configs.config import Config
 import os
 import sys
 import numpy as np
@@ -9,12 +13,8 @@ import matplotlib.pyplot as plt
 # Ensure project root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from configs.config import Config
-from models.airnet import AIRNet
-from utils.metrics import calculate_psnr, calculate_ssim
-from utils.device import get_device
 
-def run_all_stage1_tests():
+def test_run_all_stage1_tests():
     print("====================================================")
     print("AIR-NET STAGE 1 — AUTOMATED TEST SUITE")
     print("====================================================")
@@ -41,10 +41,12 @@ def run_all_stage1_tests():
             enc_blocks=config.enc_blocks,
             latent_blocks=config.latent_blocks,
             dec_blocks=config.dec_blocks,
-            ffn_expansion_factor=config.ffn_expansion_factor
+            ffn_expansion_factor=config.ffn_expansion_factor,
         ).to(device)
         num_params = sum(p.numel() for p in model.parameters())
-        assert abs(num_params - 7285399) < 1000, f"Unexpected parameter count: {num_params}"
+        assert (
+            abs(num_params - 7285399) < 1000
+        ), f"Unexpected parameter count: {num_params}"
         test_results["2. Model initializes"] = f"PASS (Params: {num_params:,})"
     except Exception as e:
         test_results["2. Model initializes"] = f"FAIL: {e}"
@@ -52,16 +54,18 @@ def run_all_stage1_tests():
     # Test 3: Checkpoint loads
     try:
         ckpt_dir = config.checkpoint_dir
-        quarantine_path = os.path.join(ckpt_dir, "quarantine", "airnet_v1_2_ema_best_model_RANDOM_UNTRAINED.pth")
+        quarantine_path = os.path.join(
+            ckpt_dir, "quarantine", "airnet_v1_2_ema_best_model_RANDOM_UNTRAINED.pth"
+        )
         ckpt_path = os.path.join(ckpt_dir, "airnet_v1_2_ema_best_model.pth")
-        
+
         target_ckpt = ckpt_path if os.path.exists(ckpt_path) else quarantine_path
         if os.path.exists(target_ckpt):
             state_dict = torch.load(target_ckpt, map_location=device)
-            if isinstance(state_dict, dict) and 'ema_state_dict' in state_dict:
-                state_dict = state_dict['ema_state_dict']
-            elif isinstance(state_dict, dict) and 'model_state_dict' in state_dict:
-                state_dict = state_dict['model_state_dict']
+            if isinstance(state_dict, dict) and "ema_state_dict" in state_dict:
+                state_dict = state_dict["ema_state_dict"]
+            elif isinstance(state_dict, dict) and "model_state_dict" in state_dict:
+                state_dict = state_dict["model_state_dict"]
             model.load_state_dict(state_dict, strict=True)
             model.eval()
             test_results["3. Checkpoint loads"] = "PASS"
@@ -96,7 +100,12 @@ def run_all_stage1_tests():
 
     # Test 7: Output spatial size is 256x256
     try:
-        assert restored_t.shape == (1, 1, 256, 256), f"Unexpected shape: {restored_t.shape}"
+        assert restored_t.shape == (
+            1,
+            1,
+            256,
+            256,
+        ), f"Unexpected shape: {restored_t.shape}"
         test_results["7. Output spatial size is 256x256"] = "PASS"
     except Exception as e:
         test_results["7. Output spatial size is 256x256"] = f"FAIL: {e}"
@@ -117,7 +126,9 @@ def run_all_stage1_tests():
         test_results["9. Clamp to [0,1] succeeds"] = f"FAIL: {e}"
 
     # Test 10: PNG saves
-    test_png_path = os.path.join("outputs", "stage1", "restored", "test_sample_restored.png")
+    test_png_path = os.path.join(
+        "outputs", "stage1", "restored", "test_sample_restored.png"
+    )
     try:
         os.makedirs(os.path.dirname(test_png_path), exist_ok=True)
         res_np = restored_clamped.squeeze().cpu().numpy()
@@ -131,7 +142,10 @@ def run_all_stage1_tests():
     # Test 11: PNG reopens
     try:
         reopened_img = Image.open(test_png_path)
-        assert reopened_img.size == (256, 256), f"Unexpected reopened size: {reopened_img.size}"
+        assert reopened_img.size == (
+            256,
+            256,
+        ), f"Unexpected reopened size: {reopened_img.size}"
         test_results["11. PNG reopens"] = "PASS"
     except Exception as e:
         test_results["11. PNG reopens"] = f"FAIL: {e}"
@@ -142,19 +156,23 @@ def run_all_stage1_tests():
         psnr_val = calculate_psnr(restored_clamped, dummy_gt)
         ssim_val = calculate_ssim(restored_clamped, dummy_gt)
         assert isinstance(psnr_val, float) and isinstance(ssim_val, float)
-        test_results["12. Metrics calculate"] = f"PASS (PSNR: {psnr_val:.2f}dB, SSIM: {ssim_val:.4f})"
+        test_results["12. Metrics calculate"] = (
+            f"PASS (PSNR: {psnr_val:.2f}dB, SSIM: {ssim_val:.4f})"
+        )
     except Exception as e:
         test_results["12. Metrics calculate"] = f"FAIL: {e}"
 
     # Test 13: Comparison image saves
     try:
-        comp_path = os.path.join("outputs", "stage1", "comparison", "test_comparison.png")
+        comp_path = os.path.join(
+            "outputs", "stage1", "comparison", "test_comparison.png"
+        )
         os.makedirs(os.path.dirname(comp_path), exist_ok=True)
         fig, axes = plt.subplots(2, 2, figsize=(6, 6))
-        axes[0,0].imshow(dummy_input.squeeze().cpu().numpy(), cmap='gray')
-        axes[0,1].imshow(res_np, cmap='gray')
-        axes[1,0].imshow(res_np, cmap='gray')
-        axes[1,1].imshow(dummy_gt.squeeze().cpu().numpy(), cmap='gray')
+        axes[0, 0].imshow(dummy_input.squeeze().cpu().numpy(), cmap="gray")
+        axes[0, 1].imshow(res_np, cmap="gray")
+        axes[1, 0].imshow(res_np, cmap="gray")
+        axes[1, 1].imshow(dummy_gt.squeeze().cpu().numpy(), cmap="gray")
         plt.tight_layout()
         plt.savefig(comp_path, dpi=100)
         plt.close(fig)
@@ -176,6 +194,7 @@ def run_all_stage1_tests():
     print("====================================================")
     return all_passed
 
+
 if __name__ == "__main__":
-    success = run_all_stage1_tests()
+    success = test_run_all_stage1_tests()
     sys.exit(0 if success else 1)

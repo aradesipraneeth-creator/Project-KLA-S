@@ -1,10 +1,11 @@
+from datasets.kla_dataset import get_train_val_datasets
+from configs.config import Config
+import numpy as np
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import numpy as np
-from configs.config import Config
-from datasets.kla_dataset import get_train_val_datasets
 
 def generate_dataset_stats(config: Config) -> str:
     """
@@ -20,7 +21,7 @@ def generate_dataset_stats(config: Config) -> str:
         train_gt_dir=config.train_gt_dir,
         seed=config.seed,
         train_split=config.train_split,
-        val_split=config.val_split
+        val_split=config.val_split,
     )
 
     lr_mins, lr_maxs, lr_means, lr_stds = [], [], [], []
@@ -33,7 +34,12 @@ def generate_dataset_stats(config: Config) -> str:
         lr_np = lr_tensor.numpy()
         gt_np = gt_tensor.numpy()
 
-        if np.isnan(lr_np).any() or np.isinf(lr_np).any() or np.isnan(gt_np).any() or np.isinf(gt_np).any():
+        if (
+            np.isnan(lr_np).any()
+            or np.isinf(lr_np).any()
+            or np.isnan(gt_np).any()
+            or np.isinf(gt_np).any()
+        ):
             nan_inf_count += 1
 
         lr_mins.append(float(lr_np.min()))
@@ -70,6 +76,7 @@ def generate_dataset_stats(config: Config) -> str:
 
     print(f"Dataset statistics report saved to {config.train_stats_file}")
     return report
+
 
 if __name__ == "__main__":
     cfg = Config()

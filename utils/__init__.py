@@ -15,7 +15,7 @@ from .device import (
     is_mps,
     is_cpu,
     is_amp_available,
-    get_gpu_memory_info
+    get_gpu_memory_info,
 )
 
 __all__ = [

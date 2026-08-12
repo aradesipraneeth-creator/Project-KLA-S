@@ -2,12 +2,14 @@ import os
 from dataclasses import dataclass, field
 from typing import List
 
+
 def resolve_existing_dir(candidates: List[str], default_fallback: str) -> str:
     """Helper function to find the first existing directory from a list of candidate paths."""
     for path in candidates:
         if path and os.path.exists(path) and os.path.isdir(path):
             return os.path.abspath(path)
     return os.path.abspath(default_fallback)
+
 
 @dataclass
 class Config:
@@ -102,14 +104,30 @@ class Config:
             self.vis_dir = os.path.join(self.output_dir, "visualizations")
             self.val_preds_dir = os.path.join(self.output_dir, "validation_predictions")
             self.results_csv = os.path.join(self.output_dir, "results", "results.csv")
-            self.train_stats_file = os.path.join(self.output_dir, "reports", "train_stats.txt")
-            self.bicubic_baseline_file = os.path.join(self.output_dir, "reports", "bicubic_baseline.txt")
-            self.model_summary_file = os.path.join(self.output_dir, "reports", "model_summary.txt")
-            self.experiment_info_file = os.path.join(self.output_dir, "reports", "experiment_info.json")
-            self.benchmark_report_file = os.path.join(self.output_dir, "reports", "benchmark_report.txt")
-            self.best_metrics_file = os.path.join(self.output_dir, "reports", "best_metrics.json")
-            self.final_report_file = os.path.join(self.output_dir, "reports", "final_report.txt")
-            self.test_results_dir = os.path.join(self.output_dir, "results", "pred_baseline")
+            self.train_stats_file = os.path.join(
+                self.output_dir, "reports", "train_stats.txt"
+            )
+            self.bicubic_baseline_file = os.path.join(
+                self.output_dir, "reports", "bicubic_baseline.txt"
+            )
+            self.model_summary_file = os.path.join(
+                self.output_dir, "reports", "model_summary.txt"
+            )
+            self.experiment_info_file = os.path.join(
+                self.output_dir, "reports", "experiment_info.json"
+            )
+            self.benchmark_report_file = os.path.join(
+                self.output_dir, "reports", "benchmark_report.txt"
+            )
+            self.best_metrics_file = os.path.join(
+                self.output_dir, "reports", "best_metrics.json"
+            )
+            self.final_report_file = os.path.join(
+                self.output_dir, "reports", "final_report.txt"
+            )
+            self.test_results_dir = os.path.join(
+                self.output_dir, "results", "pred_baseline"
+            )
 
         # 1. Resolve train_lr_dir
         if not self.train_lr_dir:
@@ -126,7 +144,9 @@ class Config:
                 os.path.join(script_dir, "Train", "NoisyLR"),
                 os.path.join("train", "train", "NoisyLR"),
             ]
-            self.train_lr_dir = resolve_existing_dir(lr_candidates, os.path.join("train", "train", "NoisyLR"))
+            self.train_lr_dir = resolve_existing_dir(
+                lr_candidates, os.path.join("train", "train", "NoisyLR")
+            )
 
         # 2. Resolve train_gt_dir
         if not self.train_gt_dir:
@@ -143,7 +163,9 @@ class Config:
                 os.path.join(script_dir, "Train", "GT"),
                 os.path.join("train", "train", "GT"),
             ]
-            self.train_gt_dir = resolve_existing_dir(gt_candidates, os.path.join("train", "train", "GT"))
+            self.train_gt_dir = resolve_existing_dir(
+                gt_candidates, os.path.join("train", "train", "GT")
+            )
 
         # 3. Resolve test_lr_dir
         if not self.test_lr_dir:
@@ -156,7 +178,9 @@ class Config:
                 os.path.join(script_dir, "Test_NoisyLR"),
                 os.path.join("Test_NoisyLR", "NoisyLR"),
             ]
-            self.test_lr_dir = resolve_existing_dir(test_candidates, os.path.join("Test_NoisyLR", "NoisyLR"))
+            self.test_lr_dir = resolve_existing_dir(
+                test_candidates, os.path.join("Test_NoisyLR", "NoisyLR")
+            )
 
     def create_dirs(self):
         """Creates all necessary output directories."""
@@ -169,6 +193,6 @@ class Config:
             self.val_preds_dir,
             self.test_results_dir,
             reports_dir,
-            results_dir
+            results_dir,
         ]:
             os.makedirs(d, exist_ok=True)

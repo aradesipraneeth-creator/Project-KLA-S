@@ -1,3 +1,8 @@
+from utils.device import get_device
+from utils.metrics import calculate_psnr, calculate_ssim
+from models.airnet import AIRNet
+from datasets.kla_dataset import get_train_val_datasets
+from configs.config import Config
 import os
 import sys
 import csv
@@ -10,11 +15,6 @@ import matplotlib.pyplot as plt
 # Ensure project root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from configs.config import Config
-from datasets.kla_dataset import get_train_val_datasets
-from models.airnet import AIRNet
-from utils.metrics import calculate_psnr, calculate_ssim
-from utils.device import get_device
 
 def main():
     print("====================================================")
@@ -35,7 +35,7 @@ def main():
         train_gt_dir=config.train_gt_dir,
         seed=config.seed,
         train_split=config.train_split,
-        val_split=config.val_split
+        val_split=config.val_split,
     )
 
     # 2. Checkpoint Verification & Model Loading
@@ -61,7 +61,7 @@ def main():
         enc_blocks=config.enc_blocks,
         latent_blocks=config.latent_blocks,
         dec_blocks=config.dec_blocks,
-        ffn_expansion_factor=config.ffn_expansion_factor
+        ffn_expansion_factor=config.ffn_expansion_factor,
     ).to(device)
 
     if ckpt_path and os.path.exists(ckpt_path):
@@ -73,7 +73,9 @@ def main():
             state_dict = state_dict["model_state_dict"]
         model.load_state_dict(state_dict)
     else:
-        print("Notice: No trained checkpoint file found in outputs/checkpoints/. Auditing architecture & evaluation pipeline with active model weights.")
+        print(
+            "Notice: No trained checkpoint file found in outputs/checkpoints/. Auditing architecture & evaluation pipeline with active model weights."
+        )
 
     model.eval()
 
@@ -81,19 +83,37 @@ def main():
     random.seed(config.seed)
     num_val = len(val_dataset)
     fixed_indices = [idx for idx in config.fixed_val_indices if idx < num_val]
-    random_indices = random.sample([i for i in range(num_val) if i not in fixed_indices], 5)
+    random_indices = random.sample(
+        [i for i in range(num_val) if i not in fixed_indices], 5
+    )
     audit_indices = fixed_indices + random_indices
 
     csv_path = os.path.join(config.output_dir, "metric_sample_audit.csv")
     csv_fieldnames = [
-        "sample_index", "filename",
-        "gt_min", "gt_max", "gt_mean", "gt_std",
-        "lr_min", "lr_max", "lr_mean", "lr_std",
-        "bicubic_min", "bicubic_max", "bicubic_mean", "bicubic_std",
-        "airnet_min", "airnet_max", "airnet_mean", "airnet_std",
-        "bicubic_psnr", "bicubic_ssim",
-        "airnet_psnr", "airnet_ssim",
-        "psnr_diff", "ssim_diff"
+        "sample_index",
+        "filename",
+        "gt_min",
+        "gt_max",
+        "gt_mean",
+        "gt_std",
+        "lr_min",
+        "lr_max",
+        "lr_mean",
+        "lr_std",
+        "bicubic_min",
+        "bicubic_max",
+        "bicubic_mean",
+        "bicubic_std",
+        "airnet_min",
+        "airnet_max",
+        "airnet_mean",
+        "airnet_std",
+        "bicubic_psnr",
+        "bicubic_ssim",
+        "airnet_psnr",
+        "airnet_ssim",
+        "psnr_diff",
+        "ssim_diff",
     ]
 
     sample_rows = []
@@ -106,7 +126,9 @@ def main():
             gt_batch = gt_tensor.unsqueeze(0).to(device)  # (1, 1, 256, 256)
 
             # Bicubic 2x
-            bicubic_batch = F.interpolate(lr_batch, size=(256, 256), mode='bicubic', align_corners=False)
+            bicubic_batch = F.interpolate(
+                lr_batch, size=(256, 256), mode="bicubic", align_corners=False
+            )
             bicubic_clamped = torch.clamp(bicubic_batch, 0.0, 1.0)
 
             # AIR-Net prediction
@@ -154,52 +176,69 @@ def main():
                 "airnet_psnr": round(airnet_psnr, 4),
                 "airnet_ssim": round(airnet_ssim, 4),
                 "psnr_diff": round(psnr_diff, 4),
-                "ssim_diff": round(ssim_diff, 4)
+                "ssim_diff": round(ssim_diff, 4),
             }
             sample_rows.append(row)
 
             print(f"Sample [{idx:03d}] {fname}:")
             print(f"  Bicubic: PSNR={bicubic_psnr:.4f} dB, SSIM={bicubic_ssim:.4f}")
-            print(f"  AIR-Net: PSNR={airnet_psnr:.4f} dB, SSIM={airnet_ssim:.4f} (Diff: PSNR {psnr_diff:+.4f} dB, SSIM {ssim_diff:+.4f})")
-            print(f"  GT Stats: min={gt_np.min():.4f}, max={gt_np.max():.4f}, mean={gt_np.mean():.4f}, std={gt_np.std():.4f}")
-            print(f"  AIR-Net Stats: min={airnet_np.min():.4f}, max={airnet_np.max():.4f}, mean={airnet_np.mean():.4f}, std={airnet_np.std():.4f}")
+            print(
+                f"  AIR-Net: PSNR={airnet_psnr:.4f} dB, SSIM={airnet_ssim:.4f} (Diff: PSNR {psnr_diff:+.4f} dB, SSIM {ssim_diff:+.4f})"
+            )
+            print(
+                f"  GT Stats: min={gt_np.min():.4f}, max={gt_np.max():.4f}, mean={gt_np.mean():.4f}, std={gt_np.std():.4f}"
+            )
+            print(
+                f"  AIR-Net Stats: min={airnet_np.min():.4f}, max={airnet_np.max():.4f}, mean={airnet_np.mean():.4f}, std={airnet_np.std():.4f}"
+            )
 
             # Generate 6-panel Audit Image (Input LR, Bicubic, AIR-Net, GT, Bicubic Error, AIR-Net Error)
             if count <= 5:
                 fig, axes = plt.subplots(2, 3, figsize=(15, 10))
 
                 # Top Row: Images
-                axes[0, 0].imshow(lr_np, cmap='gray')
+                axes[0, 0].imshow(lr_np, cmap="gray")
                 axes[0, 0].set_title(f"Input LR (128x128)")
-                axes[0, 0].axis('off')
+                axes[0, 0].axis("off")
 
-                axes[0, 1].imshow(bicubic_np, cmap='gray')
-                axes[0, 1].set_title(f"Bicubic (PSNR: {bicubic_psnr:.2f}dB, SSIM: {bicubic_ssim:.4f})")
-                axes[0, 1].axis('off')
+                axes[0, 1].imshow(bicubic_np, cmap="gray")
+                axes[0, 1].set_title(
+                    f"Bicubic (PSNR: {bicubic_psnr:.2f}dB, SSIM: {bicubic_ssim:.4f})"
+                )
+                axes[0, 1].axis("off")
 
-                axes[0, 2].imshow(gt_np, cmap='gray')
+                axes[0, 2].imshow(gt_np, cmap="gray")
                 axes[0, 2].set_title("Ground Truth (256x256)")
-                axes[0, 2].axis('off')
+                axes[0, 2].axis("off")
 
                 # Bottom Row: AIR-Net Restored + Absolute Error Maps
-                axes[1, 0].imshow(airnet_np, cmap='gray')
-                axes[1, 0].set_title(f"AIR-Net Restored (PSNR: {airnet_psnr:.2f}dB, SSIM: {airnet_ssim:.4f})")
-                axes[1, 0].axis('off')
+                axes[1, 0].imshow(airnet_np, cmap="gray")
+                axes[1, 0].set_title(
+                    f"AIR-Net Restored (PSNR: {airnet_psnr:.2f}dB, SSIM: {airnet_ssim:.4f})"
+                )
+                axes[1, 0].axis("off")
 
                 bicubic_err = np.abs(bicubic_np - gt_np)
-                im1 = axes[1, 1].imshow(bicubic_err, cmap='magma', vmin=0, vmax=0.3)
-                axes[1, 1].set_title(f"Bicubic Abs Error (Mean: {bicubic_err.mean():.4f})")
-                axes[1, 1].axis('off')
+                im1 = axes[1, 1].imshow(bicubic_err, cmap="magma", vmin=0, vmax=0.3)
+                axes[1, 1].set_title(
+                    f"Bicubic Abs Error (Mean: {bicubic_err.mean():.4f})"
+                )
+                axes[1, 1].axis("off")
                 plt.colorbar(im1, ax=axes[1, 1], fraction=0.046, pad=0.04)
 
                 airnet_err = np.abs(airnet_np - gt_np)
-                im2 = axes[1, 2].imshow(airnet_err, cmap='magma', vmin=0, vmax=0.3)
-                axes[1, 2].set_title(f"AIR-Net Abs Error (Mean: {airnet_err.mean():.4f})")
-                axes[1, 2].axis('off')
+                im2 = axes[1, 2].imshow(airnet_err, cmap="magma", vmin=0, vmax=0.3)
+                axes[1, 2].set_title(
+                    f"AIR-Net Abs Error (Mean: {airnet_err.mean():.4f})"
+                )
+                axes[1, 2].axis("off")
                 plt.colorbar(im2, ax=axes[1, 2], fraction=0.046, pad=0.04)
 
                 plt.tight_layout()
-                vis_save_path = os.path.join(audit_vis_dir, f"audit_sample_{idx:03d}_{fname.replace('.npy', '.png')}")
+                vis_save_path = os.path.join(
+                    audit_vis_dir,
+                    f"audit_sample_{idx:03d}_{fname.replace('.npy', '.png')}",
+                )
                 plt.savefig(vis_save_path, dpi=150)
                 plt.close(fig)
                 print(f"  Saved audit visualization to: {vis_save_path}")
@@ -210,6 +249,7 @@ def main():
         writer.writeheader()
         writer.writerows(sample_rows)
     print(f"\nSaved sample audit CSV to: {csv_path}")
+
 
 if __name__ == "__main__":
     main()

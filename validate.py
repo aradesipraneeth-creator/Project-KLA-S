@@ -11,6 +11,7 @@ from utils import calculate_psnr, calculate_ssim
 
 from utils.device import get_device
 
+
 def validate_checkpoint(checkpoint_path: str, config: Config = None):
     if config is None:
         config = Config()
@@ -24,14 +25,11 @@ def validate_checkpoint(checkpoint_path: str, config: Config = None):
         train_gt_dir=config.train_gt_dir,
         seed=config.seed,
         train_split=config.train_split,
-        val_split=config.val_split
+        val_split=config.val_split,
     )
 
     val_loader = DataLoader(
-        val_dataset,
-        batch_size=config.batch_size,
-        shuffle=False,
-        num_workers=0
+        val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0
     )
 
     # Load Model
@@ -44,14 +42,14 @@ def validate_checkpoint(checkpoint_path: str, config: Config = None):
         enc_blocks=config.enc_blocks,
         latent_blocks=config.latent_blocks,
         dec_blocks=config.dec_blocks,
-        ffn_expansion_factor=config.ffn_expansion_factor
+        ffn_expansion_factor=config.ffn_expansion_factor,
     ).to(device)
 
     state_dict = torch.load(checkpoint_path, map_location=device)
-    if 'ema_state_dict' in state_dict:
-        state_dict = state_dict['ema_state_dict']
-    elif 'model_state_dict' in state_dict:
-        state_dict = state_dict['model_state_dict']
+    if "ema_state_dict" in state_dict:
+        state_dict = state_dict["ema_state_dict"]
+    elif "model_state_dict" in state_dict:
+        state_dict = state_dict["model_state_dict"]
 
     model.load_state_dict(state_dict)
     model.eval()
@@ -90,13 +88,16 @@ def validate_checkpoint(checkpoint_path: str, config: Config = None):
 
     return avg_loss, avg_psnr, avg_ssim
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Validate Restormer Baseline Checkpoint")
+    parser = argparse.ArgumentParser(
+        description="Validate Restormer Baseline Checkpoint"
+    )
     parser.add_argument(
         "--checkpoint",
         type=str,
         default=os.path.join("outputs", "checkpoints", "ema_best_model.pth"),
-        help="Path to .pth checkpoint file"
+        help="Path to .pth checkpoint file",
     )
     args = parser.parse_args()
     cfg = Config()

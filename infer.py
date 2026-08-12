@@ -8,6 +8,7 @@ from models.restormer_baseline import RestormerBaseline
 
 from utils.device import get_device
 
+
 def run_test_inference(checkpoint_path: str, config: Config = None):
     if config is None:
         config = Config()
@@ -32,14 +33,14 @@ def run_test_inference(checkpoint_path: str, config: Config = None):
         enc_blocks=config.enc_blocks,
         latent_blocks=config.latent_blocks,
         dec_blocks=config.dec_blocks,
-        ffn_expansion_factor=config.ffn_expansion_factor
+        ffn_expansion_factor=config.ffn_expansion_factor,
     ).to(device)
 
     state_dict = torch.load(checkpoint_path, map_location=device)
-    if 'ema_state_dict' in state_dict:
-        state_dict = state_dict['ema_state_dict']
-    elif 'model_state_dict' in state_dict:
-        state_dict = state_dict['model_state_dict']
+    if "ema_state_dict" in state_dict:
+        state_dict = state_dict["ema_state_dict"]
+    elif "model_state_dict" in state_dict:
+        state_dict = state_dict["model_state_dict"]
 
     model.load_state_dict(state_dict)
     model.eval()
@@ -55,7 +56,9 @@ def run_test_inference(checkpoint_path: str, config: Config = None):
             if lr_arr.ndim == 2:
                 lr_arr = np.expand_dims(lr_arr, axis=0)
 
-            lr_tensor = torch.from_numpy(lr_arr).unsqueeze(0).to(device)  # (1, 1, 128, 128)
+            lr_tensor = (
+                torch.from_numpy(lr_arr).unsqueeze(0).to(device)
+            )  # (1, 1, 128, 128)
 
             pred_tensor = model(lr_tensor)  # (1, 1, 256, 256)
             pred_clamped = torch.clamp(pred_tensor, 0.0, 1.0)
@@ -66,17 +69,22 @@ def run_test_inference(checkpoint_path: str, config: Config = None):
             np.save(save_path, pred_np)
 
             if count % 50 == 0 or count == len(test_files):
-                print(f"  Processed [{count:03d}/{len(test_files):03d}] test predictions -> {save_path}")
+                print(
+                    f"  Processed [{count:03d}/{len(test_files):03d}] test predictions -> {save_path}"
+                )
 
     print(f"\nInference complete! Saved {len(test_files)} predictions to {output_dir}")
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Inference script for Test_NoisyLR dataset")
+    parser = argparse.ArgumentParser(
+        description="Inference script for Test_NoisyLR dataset"
+    )
     parser.add_argument(
         "--checkpoint",
         type=str,
         default=os.path.join("outputs", "checkpoints", "ema_best_model.pth"),
-        help="Path to trained model checkpoint"
+        help="Path to trained model checkpoint",
     )
     args = parser.parse_args()
     cfg = Config()

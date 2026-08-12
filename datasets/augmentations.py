@@ -1,6 +1,7 @@
 import random
 import torch
 
+
 class PairedTransform:
     """
     Applies synchronized spatial transformations to paired LR and GT images.
@@ -12,6 +13,7 @@ class PairedTransform:
     Disallowed:
       - Color jitter, brightness, contrast, gaussian blur.
     """
+
     def __init__(self, is_train: bool = True):
         self.is_train = is_train
 

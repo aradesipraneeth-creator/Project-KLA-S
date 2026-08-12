@@ -1,3 +1,8 @@
+from utils.device import get_device
+from utils.metrics import calculate_psnr, calculate_ssim
+from datasets.kla_dataset import get_train_val_datasets
+from models.airnet import AIRNet
+from configs.config import Config
 import os
 import sys
 import json
@@ -9,11 +14,6 @@ from PIL import Image
 # Ensure project root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from configs.config import Config
-from models.airnet import AIRNet
-from datasets.kla_dataset import get_train_val_datasets
-from utils.metrics import calculate_psnr, calculate_ssim
-from utils.device import get_device
 
 def main():
     print("====================================================")
@@ -60,12 +60,14 @@ def main():
         enc_blocks=config.enc_blocks,
         latent_blocks=config.latent_blocks,
         dec_blocks=config.dec_blocks,
-        ffn_expansion_factor=config.ffn_expansion_factor
+        ffn_expansion_factor=config.ffn_expansion_factor,
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
 
-    ckpt_path = os.path.join("outputs", "v1_2", "checkpoints", "airnet_v1_2_ema_best_model.pth")
+    ckpt_path = os.path.join(
+        "outputs", "v1_2", "checkpoints", "airnet_v1_2_ema_best_model.pth"
+    )
     ckpt_exists = os.path.exists(ckpt_path)
     ckpt_size_bytes = os.path.getsize(ckpt_path) if ckpt_exists else 0
     missing_keys, unexpected_keys = [], []
@@ -75,9 +77,11 @@ def main():
         state_dict = checkpoint_data
         if isinstance(checkpoint_data, dict) and "ema_state_dict" in checkpoint_data:
             state_dict = checkpoint_data["ema_state_dict"]
-        elif isinstance(checkpoint_data, dict) and "model_state_dict" in checkpoint_data:
+        elif (
+            isinstance(checkpoint_data, dict) and "model_state_dict" in checkpoint_data
+        ):
             state_dict = checkpoint_data["model_state_dict"]
-        
+
         load_result = model.load_state_dict(state_dict, strict=True)
         missing_keys = load_result.missing_keys
         unexpected_keys = load_result.unexpected_keys
@@ -98,7 +102,7 @@ def main():
         train_gt_dir=config.train_gt_dir,
         seed=config.seed,
         train_split=config.train_split,
-        val_split=config.val_split
+        val_split=config.val_split,
     )
 
     lr_t0, gt_t0, fname0 = val_dataset[0]
@@ -113,11 +117,17 @@ def main():
     with torch.no_grad():
         out_dict0 = model(lr_batch0)
         raw_output_t0 = out_dict0["restored"]
-        torch.save(raw_output_t0, os.path.join(audit_dir, "sample_000001_raw_output.pt"))
+        torch.save(
+            raw_output_t0, os.path.join(audit_dir, "sample_000001_raw_output.pt")
+        )
         clamped_output_t0 = torch.clamp(raw_output_t0, 0.0, 1.0)
 
     # Bicubic 2x
-    bicubic_t0 = torch.clamp(F.interpolate(lr_batch0, size=(256, 256), mode='bicubic', align_corners=False), 0.0, 1.0)
+    bicubic_t0 = torch.clamp(
+        F.interpolate(lr_batch0, size=(256, 256), mode="bicubic", align_corners=False),
+        0.0,
+        1.0,
+    )
 
     # Save PNG & Reopen
     png_path0 = os.path.join(audit_dir, "sample_000001_audit_restored.png")
@@ -247,6 +257,7 @@ def main():
     with open(mismatch_report_path, "w") as f:
         f.write(report_text)
     print(f"Saved inference mismatch audit report to: {mismatch_report_path}")
+
 
 if __name__ == "__main__":
     main()

@@ -1,12 +1,13 @@
+from utils.device import get_device, get_device_name, is_cuda
+from models.restormer_baseline import RestormerBaseline
+from configs.config import Config
+import torch
+import time
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import time
-import torch
-from configs.config import Config
-from models.restormer_baseline import RestormerBaseline
-from utils.device import get_device, get_device_name, is_cuda
 
 def run_inference_benchmark(config: Config) -> str:
     """
@@ -26,7 +27,7 @@ def run_inference_benchmark(config: Config) -> str:
         enc_blocks=config.enc_blocks,
         latent_blocks=config.latent_blocks,
         dec_blocks=config.dec_blocks,
-        ffn_expansion_factor=config.ffn_expansion_factor
+        ffn_expansion_factor=config.ffn_expansion_factor,
     ).to(device)
 
     model.eval()
@@ -103,6 +104,7 @@ def run_inference_benchmark(config: Config) -> str:
 
     print(f"Benchmark completed and saved to {config.benchmark_report_file}")
     return report
+
 
 if __name__ == "__main__":
     cfg = Config()

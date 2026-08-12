@@ -1,6 +1,7 @@
 import os
 import shutil
 
+
 def main():
     print("====================================================")
     print("AIR-NET V1 — BACKUP HISTORICAL RESULTS & METADATA")
@@ -32,8 +33,11 @@ def main():
             backed_up_count += 1
             print(f"  [OK] Backed up: {fname} -> {dst}")
 
-    print(f"\nSuccessfully backed up {backed_up_count} historical metadata/log files to {backup_dir}")
+    print(
+        f"\nSuccessfully backed up {backed_up_count} historical metadata/log files to {backup_dir}"
+    )
     print("====================================================")
+
 
 if __name__ == "__main__":
     main()

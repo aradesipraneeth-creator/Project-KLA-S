@@ -4,9 +4,9 @@ import tempfile
 import torch
 
 # Ensure UTF-8 output formatting for Windows console
-if hasattr(sys.stdout, 'reconfigure'):
+if hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
@@ -18,12 +18,13 @@ from utils.device import (
     is_mps,
     is_cpu,
     is_amp_available,
-    get_gpu_memory_info
+    get_gpu_memory_info,
 )
 from models.airnet import AIRNet
 from configs.config import Config
 
-def main():
+
+def test_main():
     print("====================================================")
     print("AIR-NET V1 - CROSS-PLATFORM DEVICE VERIFICATION")
     print("====================================================")
@@ -35,17 +36,21 @@ def main():
     device = get_device()
     device_name = get_device_name()
     print(f"✓ get_device() resolved to: {device} ({device_name})")
-    
+
     assert isinstance(device, torch.device)
     assert is_cuda() == (device.type == "cuda")
     assert is_mps() == (device.type == "mps")
     assert is_cpu() == (device.type == "cpu")
     assert is_amp_available() == (device.type == "cuda")
-    print("✓ Boolean hardware flags (is_cuda, is_mps, is_cpu, is_amp_available) PASSED.")
+    print(
+        "✓ Boolean hardware flags (is_cuda, is_mps, is_cpu, is_amp_available) PASSED."
+    )
 
     # 3. Test GPU Memory Information Retrieval
     alloc, res, peak = get_gpu_memory_info()
-    print(f"✓ get_gpu_memory_info() returned: Allocated {alloc:.2f}MB, Reserved {res:.2f}MB, Peak {peak:.2f}MB.")
+    print(
+        f"✓ get_gpu_memory_info() returned: Allocated {alloc:.2f}MB, Reserved {res:.2f}MB, Peak {peak:.2f}MB."
+    )
 
     # 4. Test Checkpoint Portability
     config = Config()
@@ -58,7 +63,7 @@ def main():
         enc_blocks=config.enc_blocks,
         latent_blocks=config.latent_blocks,
         dec_blocks=config.dec_blocks,
-        ffn_expansion_factor=config.ffn_expansion_factor
+        ffn_expansion_factor=config.ffn_expansion_factor,
     )
 
     with tempfile.NamedTemporaryFile(suffix=".pth", delete=False) as tmp_file:
@@ -66,11 +71,11 @@ def main():
 
     try:
         # Save model checkpoint
-        torch.save({'model_state_dict': model.state_dict(), 'epoch': 1}, tmp_ckpt_path)
+        torch.save({"model_state_dict": model.state_dict(), "epoch": 1}, tmp_ckpt_path)
 
         # Load model checkpoint with portable device mapping
         loaded_state = torch.load(tmp_ckpt_path, map_location=get_device())
-        model.load_state_dict(loaded_state['model_state_dict'])
+        model.load_state_dict(loaded_state["model_state_dict"])
         model = model.to(get_device())
         print(f"✓ Portable checkpoint load with map_location={get_device()} PASSED.")
 
@@ -95,5 +100,6 @@ def main():
     print("✓ Backward compatibility maintained")
     print("====================================================")
 
+
 if __name__ == "__main__":
-    main()
+    test_main()

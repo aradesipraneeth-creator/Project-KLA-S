@@ -90,7 +90,7 @@ for file in files:
     total_pixels += img.size
 
 mean = pixel_sum / total_pixels
-std = np.sqrt((pixel_sq_sum / total_pixels) - mean ** 2)
+std = np.sqrt((pixel_sq_sum / total_pixels) - mean**2)
 
 print("\nDataset Statistics")
 print("------------------")

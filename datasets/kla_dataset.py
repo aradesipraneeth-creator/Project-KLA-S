@@ -5,18 +5,20 @@ import torch
 from torch.utils.data import Dataset
 from datasets.augmentations import PairedTransform
 
+
 class KLADataset(Dataset):
     """
     PyTorch Dataset for paired KLA Semiconductor Image Restoration.
     Reads paired .npy files from NoisyLR (128x128 float32) and GT (256x256 float32).
     Preserves exact original float values without clipping.
     """
+
     def __init__(
         self,
         lr_dir: str,
         gt_dir: str,
         filenames: List[str],
-        transform: Optional[PairedTransform] = None
+        transform: Optional[PairedTransform] = None,
     ):
         """
         Args:
@@ -55,12 +57,13 @@ class KLADataset(Dataset):
 
         return lr_tensor, gt_tensor, fname
 
+
 def get_train_val_datasets(
     train_lr_dir: str,
     train_gt_dir: str,
     seed: int = 42,
     train_split: int = 2880,
-    val_split: int = 320
+    val_split: int = 320,
 ) -> Tuple[KLADataset, KLADataset]:
     """
     Scans the training directories, verifies paired filenames,
@@ -83,9 +86,9 @@ def get_train_val_datasets(
     gt_files = set(f for f in os.listdir(train_gt_dir) if f.endswith(".npy"))
 
     common_files = sorted(list(lr_files.intersection(gt_files)))
-    assert len(common_files) == train_split + val_split, (
-        f"Expected {train_split + val_split} paired files, but found {len(common_files)}."
-    )
+    assert (
+        len(common_files) == train_split + val_split
+    ), f"Expected {train_split + val_split} paired files, but found {len(common_files)}."
 
     # Fixed seed shuffling
     rng = np.random.RandomState(seed)
@@ -93,20 +96,20 @@ def get_train_val_datasets(
     rng.shuffle(shuffled_files)
 
     train_files = sorted(shuffled_files[:train_split])
-    val_files = sorted(shuffled_files[train_split:train_split + val_split])
+    val_files = sorted(shuffled_files[train_split : train_split + val_split])
 
     train_dataset = KLADataset(
         lr_dir=train_lr_dir,
         gt_dir=train_gt_dir,
         filenames=train_files,
-        transform=PairedTransform(is_train=True)
+        transform=PairedTransform(is_train=True),
     )
 
     val_dataset = KLADataset(
         lr_dir=train_lr_dir,
         gt_dir=train_gt_dir,
         filenames=val_files,
-        transform=PairedTransform(is_train=False)
+        transform=PairedTransform(is_train=False),
     )
 
     return train_dataset, val_dataset

@@ -1,10 +1,11 @@
+from utils.logger import save_json
+from configs.config import Config
+import time
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import time
-from configs.config import Config
-from utils.logger import save_json
 
 def generate_experiment_info(config: Config) -> dict:
     """
@@ -18,7 +19,7 @@ def generate_experiment_info(config: Config) -> dict:
         "dataset_split": {
             "total_samples": config.total_samples,
             "train_samples": config.train_split,
-            "val_samples": config.val_split
+            "val_samples": config.val_split,
         },
         "model_config": {
             "in_channels": config.in_channels,
@@ -29,7 +30,7 @@ def generate_experiment_info(config: Config) -> dict:
             "enc_blocks": config.enc_blocks,
             "latent_blocks": config.latent_blocks,
             "dec_blocks": config.dec_blocks,
-            "ffn_expansion_factor": config.ffn_expansion_factor
+            "ffn_expansion_factor": config.ffn_expansion_factor,
         },
         "training_config": {
             "batch_size": config.batch_size,
@@ -43,14 +44,15 @@ def generate_experiment_info(config: Config) -> dict:
             "ema_decay": config.ema_decay,
             "loss_weights": {
                 "L1": config.loss_l1_weight,
-                "SSIM": config.loss_ssim_weight
-            }
-        }
+                "SSIM": config.loss_ssim_weight,
+            },
+        },
     }
 
     save_json(metadata, config.experiment_info_file)
     print(f"Reproducibility package saved to {config.experiment_info_file}")
     return metadata
+
 
 if __name__ == "__main__":
     cfg = Config()

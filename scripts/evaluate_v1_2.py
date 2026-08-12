@@ -1,3 +1,8 @@
+from utils.device import get_device, get_device_name, is_cuda
+from utils.metrics import calculate_psnr, calculate_ssim
+from models.airnet import AIRNet
+from datasets.kla_dataset import get_train_val_datasets
+from configs.config import Config
 import os
 import sys
 import time
@@ -10,11 +15,6 @@ import matplotlib.pyplot as plt
 # Ensure project root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from configs.config import Config
-from datasets.kla_dataset import get_train_val_datasets
-from models.airnet import AIRNet
-from utils.metrics import calculate_psnr, calculate_ssim
-from utils.device import get_device, get_device_name, is_cuda
 
 def load_model_weights(model: torch.nn.Module, ckpt_path: str, device: torch.device):
     """Safely loads model or EMA state dict into AIRNet model."""
@@ -29,11 +29,13 @@ def load_model_weights(model: torch.nn.Module, ckpt_path: str, device: torch.dev
     model.eval()
     return True
 
+
 def compute_lpips_metric(pred_tensor: torch.Tensor, gt_tensor: torch.Tensor):
     """Computes LPIPS distance using lpips library if available, else L1 perceptual fallback."""
     try:
         import lpips
-        loss_fn = lpips.LPIPS(net='alex', verbose=False).to(pred_tensor.device)
+
+        loss_fn = lpips.LPIPS(net="alex", verbose=False).to(pred_tensor.device)
         p3 = pred_tensor.repeat(1, 3, 1, 1) * 2.0 - 1.0
         g3 = gt_tensor.repeat(1, 3, 1, 1) * 2.0 - 1.0
         with torch.no_grad():
@@ -44,7 +46,10 @@ def compute_lpips_metric(pred_tensor: torch.Tensor, gt_tensor: torch.Tensor):
             dist = F.l1_loss(pred_tensor, gt_tensor).item()
         return dist
 
-def measure_inference_time_ms(model: torch.nn.Module, device: torch.device, num_runs: int = 5):
+
+def measure_inference_time_ms(
+    model: torch.nn.Module, device: torch.device, num_runs: int = 5
+):
     """Measures single-image inference latency in milliseconds."""
     if not is_cuda():
         num_runs = 3
@@ -65,6 +70,7 @@ def measure_inference_time_ms(model: torch.nn.Module, device: torch.device, num_
     t1 = time.perf_counter()
     return ((t1 - t0) / num_runs) * 1000.0
 
+
 def main():
     print("====================================================")
     print("AIR-NET V1.2 CONTROLLED EXPERIMENT EVALUATION & 4-WAY COMPARISON")
@@ -82,7 +88,7 @@ def main():
         train_gt_dir=config_v12.train_gt_dir,
         seed=config_v12.seed,
         train_split=config_v12.train_split,
-        val_split=config_v12.val_split
+        val_split=config_v12.val_split,
     )
 
     # Instantiate AIR-Net Models (v1, v1.1, v1.2)
@@ -96,7 +102,7 @@ def main():
             enc_blocks=config_v12.enc_blocks,
             latent_blocks=config_v12.latent_blocks,
             dec_blocks=config_v12.dec_blocks,
-            ffn_expansion_factor=config_v12.ffn_expansion_factor
+            ffn_expansion_factor=config_v12.ffn_expansion_factor,
         ).to(device)
 
     model_v1 = create_airnet_instance()
@@ -108,9 +114,13 @@ def main():
     if not os.path.exists(ckpt_v1):
         ckpt_v1 = os.path.join("outputs", "checkpoints", "ema_best_model.pth")
 
-    ckpt_v11 = os.path.join("outputs", "v1_1", "checkpoints", "airnet_v1_1_ema_best_model.pth")
+    ckpt_v11 = os.path.join(
+        "outputs", "v1_1", "checkpoints", "airnet_v1_1_ema_best_model.pth"
+    )
     if not os.path.exists(ckpt_v11):
-        ckpt_v11 = os.path.join("outputs", "v1_1", "checkpoints", "airnet_ema_best_model.pth")
+        ckpt_v11 = os.path.join(
+            "outputs", "v1_1", "checkpoints", "airnet_ema_best_model.pth"
+        )
 
     ckpt_v12 = os.path.join(config_v12.checkpoint_dir, "airnet_v1_2_ema_best_model.pth")
     if not os.path.exists(ckpt_v12):
@@ -142,7 +152,9 @@ def main():
 
             if has_v12:
                 out12 = model_v12(lr_b)
-                p12 = torch.clamp(out12["restored"] if isinstance(out12, dict) else out12, 0.0, 1.0)
+                p12 = torch.clamp(
+                    out12["restored"] if isinstance(out12, dict) else out12, 0.0, 1.0
+                )
                 v12_psnr_list.append(calculate_psnr(p12, gt_b))
                 v12_ssim_list.append(calculate_ssim(p12, gt_b))
                 v12_lpips_list.append(compute_lpips_metric(p12, gt_b))
@@ -219,13 +231,23 @@ def main():
             lr_b = lr_t.unsqueeze(0).to(device)
             gt_b = gt_t.unsqueeze(0).to(device)
 
-            bicubic_b = torch.clamp(F.interpolate(lr_b, size=(256, 256), mode='bicubic', align_corners=False), 0, 1)
+            bicubic_b = torch.clamp(
+                F.interpolate(
+                    lr_b, size=(256, 256), mode="bicubic", align_corners=False
+                ),
+                0,
+                1,
+            )
             out1 = model_v1(lr_b)
             p1 = torch.clamp(out1["restored"] if isinstance(out1, dict) else out1, 0, 1)
             out11 = model_v11(lr_b)
-            p11 = torch.clamp(out11["restored"] if isinstance(out11, dict) else out11, 0, 1)
+            p11 = torch.clamp(
+                out11["restored"] if isinstance(out11, dict) else out11, 0, 1
+            )
             out12 = model_v12(lr_b)
-            p12 = torch.clamp(out12["restored"] if isinstance(out12, dict) else out12, 0, 1)
+            p12 = torch.clamp(
+                out12["restored"] if isinstance(out12, dict) else out12, 0, 1
+            )
 
             lr_np = lr_b.squeeze().cpu().numpy()
             gt_np = gt_b.squeeze().cpu().numpy()
@@ -242,49 +264,52 @@ def main():
             fig, axes = plt.subplots(2, 5, figsize=(25, 10))
 
             # Row 0: Images
-            axes[0, 0].imshow(lr_np, cmap='gray')
+            axes[0, 0].imshow(lr_np, cmap="gray")
             axes[0, 0].set_title(f"Input NoisyLR (128x128)")
-            axes[0, 0].axis('off')
+            axes[0, 0].axis("off")
 
-            axes[0, 1].imshow(bicubic_np, cmap='gray')
+            axes[0, 1].imshow(bicubic_np, cmap="gray")
             axes[0, 1].set_title("Bicubic Baseline")
-            axes[0, 1].axis('off')
+            axes[0, 1].axis("off")
 
-            axes[0, 2].imshow(v1_np, cmap='gray')
+            axes[0, 2].imshow(v1_np, cmap="gray")
             axes[0, 2].set_title(f"AIR-Net v1 ({calculate_psnr(p1, gt_b):.2f}dB)")
-            axes[0, 2].axis('off')
+            axes[0, 2].axis("off")
 
-            axes[0, 3].imshow(v11_np, cmap='gray')
+            axes[0, 3].imshow(v11_np, cmap="gray")
             axes[0, 3].set_title(f"AIR-Net v1.1 ({calculate_psnr(p11, gt_b):.2f}dB)")
-            axes[0, 3].axis('off')
+            axes[0, 3].axis("off")
 
-            axes[0, 4].imshow(gt_np, cmap='gray')
+            axes[0, 4].imshow(gt_np, cmap="gray")
             axes[0, 4].set_title("Ground Truth (256x256)")
-            axes[0, 4].axis('off')
+            axes[0, 4].axis("off")
 
             # Row 1: AIR-Net v1.2 + Error Maps
-            axes[1, 0].imshow(v12_np, cmap='gray')
+            axes[1, 0].imshow(v12_np, cmap="gray")
             axes[1, 0].set_title(f"AIR-Net v1.2 ({calculate_psnr(p12, gt_b):.2f}dB)")
-            axes[1, 0].axis('off')
+            axes[1, 0].axis("off")
 
-            im1 = axes[1, 1].imshow(bicubic_err, cmap='magma', vmin=0, vmax=0.3)
+            im1 = axes[1, 1].imshow(bicubic_err, cmap="magma", vmin=0, vmax=0.3)
             axes[1, 1].set_title(f"Bicubic Error ({bicubic_err.mean():.4f})")
-            axes[1, 1].axis('off')
+            axes[1, 1].axis("off")
 
-            im2 = axes[1, 2].imshow(v1_err, cmap='magma', vmin=0, vmax=0.3)
+            im2 = axes[1, 2].imshow(v1_err, cmap="magma", vmin=0, vmax=0.3)
             axes[1, 2].set_title(f"v1 Error ({v1_err.mean():.4f})")
-            axes[1, 2].axis('off')
+            axes[1, 2].axis("off")
 
-            im3 = axes[1, 3].imshow(v11_err, cmap='magma', vmin=0, vmax=0.3)
+            im3 = axes[1, 3].imshow(v11_err, cmap="magma", vmin=0, vmax=0.3)
             axes[1, 3].set_title(f"v1.1 Error ({v11_err.mean():.4f})")
-            axes[1, 3].axis('off')
+            axes[1, 3].axis("off")
 
-            im4 = axes[1, 4].imshow(v12_err, cmap='magma', vmin=0, vmax=0.3)
+            im4 = axes[1, 4].imshow(v12_err, cmap="magma", vmin=0, vmax=0.3)
             axes[1, 4].set_title(f"v1.2 Error ({v12_err.mean():.4f})")
-            axes[1, 4].axis('off')
+            axes[1, 4].axis("off")
 
             plt.tight_layout()
-            vis_path = os.path.join(vis_dir, f"v1_2_comparison_sample_{idx:03d}_{fname.replace('.npy', '.png')}")
+            vis_path = os.path.join(
+                vis_dir,
+                f"v1_2_comparison_sample_{idx:03d}_{fname.replace('.npy', '.png')}",
+            )
             plt.savefig(vis_path, dpi=150)
             plt.close(fig)
 
@@ -332,6 +357,7 @@ def main():
         f.write(rec_report)
     print(f"Saved next step recommendation to: {rec_path}")
     print(rec_report)
+
 
 if __name__ == "__main__":
     main()

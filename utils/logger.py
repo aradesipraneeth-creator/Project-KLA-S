@@ -3,6 +3,7 @@ import csv
 import json
 from typing import Optional, List, Dict, Any
 
+
 class CSVLogger:
     """
     Automated logging to results.csv with synchronized columns for AIR-Net v1:
@@ -10,6 +11,7 @@ class CSVLogger:
     gpu_allocated_mb, gpu_reserved_mb, gpu_peak_mb,
     images_per_second, batches_per_second
     """
+
     DEFAULT_FIELDNAMES = [
         "epoch",
         "train_loss",
@@ -21,7 +23,7 @@ class CSVLogger:
         "gpu_reserved_mb",
         "gpu_peak_mb",
         "images_per_second",
-        "batches_per_second"
+        "batches_per_second",
     ]
 
     def __init__(self, csv_filepath: str, extra_fieldnames: Optional[List[str]] = None):
@@ -31,7 +33,7 @@ class CSVLogger:
             for fn in extra_fieldnames:
                 if fn not in self.fieldnames:
                     self.fieldnames.append(fn)
-        
+
         # Initialize CSV file with headers if it doesn't exist
         os.makedirs(os.path.dirname(csv_filepath), exist_ok=True)
         if not os.path.exists(csv_filepath):
@@ -53,7 +55,7 @@ class CSVLogger:
         gpu_max_allocated_mb: Optional[float] = None,
         images_per_second: Optional[float] = None,
         batches_per_second: Optional[float] = None,
-        **kwargs: Any
+        **kwargs: Any,
     ):
         # Backward compatibility for legacy gpu_max_allocated_mb parameter
         if gpu_peak_mb is None and gpu_max_allocated_mb is not None:
@@ -71,8 +73,16 @@ class CSVLogger:
             "gpu_allocated_mb": round(gpu_allocated_mb or 0.0, 2),
             "gpu_reserved_mb": round(gpu_reserved_mb or 0.0, 2),
             "gpu_peak_mb": round(gpu_peak_mb or 0.0, 2),
-            "images_per_second": round(images_per_second or 0.0, 2) if images_per_second is not None else 0.0,
-            "batches_per_second": round(batches_per_second or 0.0, 2) if batches_per_second is not None else 0.0,
+            "images_per_second": (
+                round(images_per_second or 0.0, 2)
+                if images_per_second is not None
+                else 0.0
+            ),
+            "batches_per_second": (
+                round(batches_per_second or 0.0, 2)
+                if batches_per_second is not None
+                else 0.0
+            ),
         }
 
         # Dynamically map any additional registered fieldnames from kwargs
@@ -85,8 +95,11 @@ class CSVLogger:
                     row[key] = val
 
         with open(self.csv_filepath, mode="a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=self.fieldnames, extrasaction='ignore')
+            writer = csv.DictWriter(
+                f, fieldnames=self.fieldnames, extrasaction="ignore"
+            )
             writer.writerow(row)
+
 
 def save_json(data: dict, filepath: str):
     """Saves dictionary data to a formatted JSON file."""
@@ -94,11 +107,22 @@ def save_json(data: dict, filepath: str):
     with open(filepath, "w") as f:
         json.dump(data, f, indent=4)
 
-def print_epoch_summary(epoch: int, total_epochs: int, train_loss: float, val_loss: float, psnr: float, ssim: float, lr: float):
+
+def print_epoch_summary(
+    epoch: int,
+    total_epochs: int,
+    train_loss: float,
+    val_loss: float,
+    psnr: float,
+    ssim: float,
+    lr: float,
+):
     """Prints a clean epoch summary table line to console."""
-    print(f"[Epoch {epoch:02d}/{total_epochs:02d}] "
-          f"Train Loss: {train_loss:.6f} | "
-          f"Val Loss: {val_loss:.6f} | "
-          f"PSNR: {psnr:.4f} dB | "
-          f"SSIM: {ssim:.4f} | "
-          f"LR: {lr:.2e}")
+    print(
+        f"[Epoch {epoch:02d}/{total_epochs:02d}] "
+        f"Train Loss: {train_loss:.6f} | "
+        f"Val Loss: {val_loss:.6f} | "
+        f"PSNR: {psnr:.4f} dB | "
+        f"SSIM: {ssim:.4f} | "
+        f"LR: {lr:.2e}"
+    )

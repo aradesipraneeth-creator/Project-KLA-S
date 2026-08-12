@@ -1,3 +1,8 @@
+from utils.device import get_device, print_device_info, is_cuda
+from utils.metrics import calculate_psnr, calculate_ssim
+from datasets.kla_dataset import get_train_val_datasets
+from models.airnet import AIRNet
+from configs.config import Config
 import os
 import sys
 import json
@@ -12,17 +17,13 @@ import matplotlib.pyplot as plt
 # Ensure project root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from configs.config import Config
-from models.airnet import AIRNet
-from datasets.kla_dataset import get_train_val_datasets
-from utils.metrics import calculate_psnr, calculate_ssim
-from utils.device import get_device, print_device_info, is_cuda
 
 def compute_lpips_metric(pred_tensor: torch.Tensor, gt_tensor: torch.Tensor) -> float:
     """Computes LPIPS distance if lpips library is installed, else L1 feature approximation."""
     try:
         import lpips
-        loss_fn = lpips.LPIPS(net='alex', verbose=False).to(pred_tensor.device)
+
+        loss_fn = lpips.LPIPS(net="alex", verbose=False).to(pred_tensor.device)
         p3 = pred_tensor.repeat(1, 3, 1, 1) * 2.0 - 1.0
         g3 = gt_tensor.repeat(1, 3, 1, 1) * 2.0 - 1.0
         with torch.no_grad():
@@ -33,7 +34,13 @@ def compute_lpips_metric(pred_tensor: torch.Tensor, gt_tensor: torch.Tensor) -> 
             dist = F.l1_loss(pred_tensor, gt_tensor).item()
         return dist
 
-def load_verified_v1_2_checkpoint(model: torch.nn.Module, config: Config, device: torch.device, checkpoint_path: str = None) -> str:
+
+def load_verified_v1_2_checkpoint(
+    model: torch.nn.Module,
+    config: Config,
+    device: torch.device,
+    checkpoint_path: str = None,
+) -> str:
     """
     Safely loads a verified trained AIR-Net v1.2 checkpoint.
     STRICT SAFETY RULE: Never silently create random/fake checkpoints.
@@ -41,18 +48,26 @@ def load_verified_v1_2_checkpoint(model: torch.nn.Module, config: Config, device
     """
     ckpt_dir = config.checkpoint_dir
     os.makedirs(ckpt_dir, exist_ok=True)
-    
+
     candidates = []
     if checkpoint_path:
         candidates.append(checkpoint_path)
-    
-    candidates.extend([
-        os.path.join(ckpt_dir, "airnet_v1_2_ema_best_model.pth"),
-        os.path.join("outputs", "v1_2", "checkpoints", "airnet_v1_2_ema_best_model.pth"),
-        os.path.join("outputs", "v1_2", "checkpoints", "airnet_v1_2_best_model.pth"),
-        os.path.join("outputs", "v1_1", "checkpoints", "airnet_v1_1_ema_best_model.pth"),
-        os.path.join("outputs", "checkpoints", "airnet_ema_best_model.pth"),
-    ])
+
+    candidates.extend(
+        [
+            os.path.join(ckpt_dir, "airnet_v1_2_ema_best_model.pth"),
+            os.path.join(
+                "outputs", "v1_2", "checkpoints", "airnet_v1_2_ema_best_model.pth"
+            ),
+            os.path.join(
+                "outputs", "v1_2", "checkpoints", "airnet_v1_2_best_model.pth"
+            ),
+            os.path.join(
+                "outputs", "v1_1", "checkpoints", "airnet_v1_1_ema_best_model.pth"
+            ),
+            os.path.join("outputs", "checkpoints", "airnet_ema_best_model.pth"),
+        ]
+    )
 
     chosen_path = None
     for cand in candidates:
@@ -98,6 +113,7 @@ def load_verified_v1_2_checkpoint(model: torch.nn.Module, config: Config, device
     print("====================================================")
     return chosen_path
 
+
 def find_best_edge_crop(gt_array: np.ndarray, crop_size: int = 64):
     """Finds coordinates (r0, c0) for high-frequency edge detail zoom crop."""
     h, w = gt_array.shape
@@ -110,7 +126,7 @@ def find_best_edge_crop(gt_array: np.ndarray, crop_size: int = 64):
 
     for r in range(0, h - crop_size + 1, 16):
         for c in range(0, w - crop_size + 1, 16):
-            patch_mag = grad_mag[r:r+crop_size, c:c+crop_size]
+            patch_mag = grad_mag[r : r + crop_size, c : c + crop_size]
             score = patch_mag.std() + patch_mag.mean()
             if score > best_score:
                 best_score = score
@@ -118,13 +134,14 @@ def find_best_edge_crop(gt_array: np.ndarray, crop_size: int = 64):
 
     return best_coords
 
+
 def run_stage1_pipeline(
     input_path: str = None,
     output_path: str = None,
     checkpoint_path: str = None,
     device_str: str = "auto",
     gt_path: str = None,
-    num_samples: int = 10
+    num_samples: int = 10,
 ):
     print("====================================================")
     print("AIR-NET STAGE 1 — IMAGE RESTORATION INFERENCE PIPELINE")
@@ -132,7 +149,7 @@ def run_stage1_pipeline(
 
     # 1. Configuration & Setup
     config = Config(MODEL_VERSION="AIR-Net-v1.2")
-    
+
     stage1_dir = os.path.join("outputs", "stage1")
     input_dir = os.path.join(stage1_dir, "input")
     restored_dir = os.path.join(stage1_dir, "restored")
@@ -141,7 +158,15 @@ def run_stage1_pipeline(
     metrics_dir = os.path.join(stage1_dir, "metrics")
     degradation_dir = os.path.join(stage1_dir, "degradation")
 
-    for d in [stage1_dir, input_dir, restored_dir, gt_dir_out, comparison_dir, metrics_dir, degradation_dir]:
+    for d in [
+        stage1_dir,
+        input_dir,
+        restored_dir,
+        gt_dir_out,
+        comparison_dir,
+        metrics_dir,
+        degradation_dir,
+    ]:
         os.makedirs(d, exist_ok=True)
 
     # 2. Device Selection (Part 6)
@@ -163,7 +188,7 @@ def run_stage1_pipeline(
         enc_blocks=config.enc_blocks,
         latent_blocks=config.latent_blocks,
         dec_blocks=config.dec_blocks,
-        ffn_expansion_factor=config.ffn_expansion_factor
+        ffn_expansion_factor=config.ffn_expansion_factor,
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
@@ -171,7 +196,9 @@ def run_stage1_pipeline(
     assert abs(num_params - 7285399) < 1000, f"Parameter count mismatch: {num_params}"
 
     # Load Checkpoint strictly safely
-    checkpoint_path = load_verified_v1_2_checkpoint(model, config, device, checkpoint_path)
+    checkpoint_path = load_verified_v1_2_checkpoint(
+        model, config, device, checkpoint_path
+    )
 
     model.eval()
 
@@ -181,13 +208,15 @@ def run_stage1_pipeline(
         train_gt_dir=config.train_gt_dir,
         seed=config.seed,
         train_split=config.train_split,
-        val_split=config.val_split
+        val_split=config.val_split,
     )
 
     print(f"\n--- DATASET PAIRING VERIFICATION (First 10 Samples) ---")
     for i in range(min(10, len(val_dataset))):
         lr_t, gt_t, fname = val_dataset[i]
-        print(f"  Sample [{i:02d}]: NoisyLR = {fname} <--> GT = {fname} (Shape LR: {tuple(lr_t.shape)}, GT: {tuple(gt_t.shape)})")
+        print(
+            f"  Sample [{i:02d}]: NoisyLR = {fname} <--> GT = {fname} (Shape LR: {tuple(lr_t.shape)}, GT: {tuple(gt_t.shape)})"
+        )
 
     # 5. Process Primary Sample 001 (Sample 0)
     lr_t0, gt_t0, fname0 = val_dataset[0]
@@ -197,7 +226,9 @@ def run_stage1_pipeline(
     print("\n--- SAMPLE 001 SHAPE & STATS AUDIT ---")
     lr_np0 = lr_t0.squeeze().cpu().numpy()
     gt_np0 = gt_t0.squeeze().cpu().numpy()
-    print(f"Input NoisyLR:   shape={lr_batch0.shape}, dtype={lr_t0.dtype}, min={lr_np0.min():.4f}, max={lr_np0.max():.4f}, mean={lr_np0.mean():.4f}")
+    print(
+        f"Input NoisyLR:   shape={lr_batch0.shape}, dtype={lr_t0.dtype}, min={lr_np0.min():.4f}, max={lr_np0.max():.4f}, mean={lr_np0.mean():.4f}"
+    )
 
     with torch.no_grad():
         out_dict0 = model(lr_batch0)
@@ -207,7 +238,9 @@ def run_stage1_pipeline(
         restored_clamped0 = torch.clamp(restored_tensor0, 0.0, 1.0)
 
     restored_np0 = restored_clamped0.squeeze().cpu().numpy()
-    print(f"Restored Output: shape={restored_batch0.shape if 'restored_batch0' in locals() else restored_clamped0.shape}, dtype={restored_clamped0.dtype}, min={restored_np0.min():.4f}, max={restored_np0.max():.4f}, mean={restored_np0.mean():.4f}")
+    print(
+        f"Restored Output: shape={restored_batch0.shape if 'restored_batch0' in locals() else restored_clamped0.shape}, dtype={restored_clamped0.dtype}, min={restored_np0.min():.4f}, max={restored_np0.max():.4f}, mean={restored_np0.mean():.4f}"
+    )
 
     # Part 10: Save Actual PNG Images
     sample0_basename = fname0.replace(".npy", "")
@@ -233,7 +266,7 @@ def run_stage1_pipeline(
     assert os.path.exists(restored_png_path0), f"File not found: {restored_png_path0}"
     reopened_img0 = Image.open(restored_png_path0)
     reopened_np0 = np.array(reopened_img0)
-    
+
     print("\n====================================================")
     print("RESTORATION FILE VERIFICATION")
     print("====================================================")
@@ -244,14 +277,21 @@ def run_stage1_pipeline(
     print(f"  [OK] Can be Opened:   True")
     print(f"  [OK] Width:           {reopened_img0.width}")
     print(f"  [OK] Height:          {reopened_img0.height}")
-    print(f"  [OK] Mode/Channels:   {reopened_img0.mode} ({1 if reopened_img0.mode=='L' else len(reopened_img0.getbands())})")
+    print(
+        f"  [OK] Mode/Channels:   {reopened_img0.mode} ({1 if reopened_img0.mode == 'L' else len(reopened_img0.getbands())})"
+    )
     print(f"  [OK] dtype:           {reopened_np0.dtype}")
     print(f"  [OK] Value Range:     min={reopened_np0.min()}, max={reopened_np0.max()}")
     print("Status:              PASS")
     print("====================================================")
 
     # Convert reopened PNG back to metric float32 tensor
-    reopened_tensor0 = torch.from_numpy(reopened_np0.astype(np.float32) / 255.0).unsqueeze(0).unsqueeze(0).to(device)
+    reopened_tensor0 = (
+        torch.from_numpy(reopened_np0.astype(np.float32) / 255.0)
+        .unsqueeze(0)
+        .unsqueeze(0)
+        .to(device)
+    )
 
     # Part 14, 15, 16: Metric Calculations & Tensor vs Saved Image Cross-Check
     tensor_psnr = calculate_psnr(restored_clamped0, gt_batch0)
@@ -263,7 +303,9 @@ def run_stage1_pipeline(
     image_lpips = compute_lpips_metric(reopened_tensor0, gt_batch0)
 
     # Bicubic 2x
-    bicubic_batch0 = F.interpolate(lr_batch0, size=(256, 256), mode='bicubic', align_corners=False)
+    bicubic_batch0 = F.interpolate(
+        lr_batch0, size=(256, 256), mode="bicubic", align_corners=False
+    )
     bicubic_clamped0 = torch.clamp(bicubic_batch0, 0.0, 1.0)
     bicubic_psnr0 = calculate_psnr(bicubic_clamped0, gt_batch0)
     bicubic_ssim0 = calculate_ssim(bicubic_clamped0, gt_batch0)
@@ -274,10 +316,18 @@ def run_stage1_pipeline(
     lpips_diff_bicubic = image_lpips - bicubic_lpips0
 
     print("\n--- SAMPLE 001 METRICS CROSS-CHECK ---")
-    print(f"Direct Tensor:  PSNR = {tensor_psnr:.4f} dB | SSIM = {tensor_ssim:.4f} | LPIPS = {tensor_lpips:.4f}")
-    print(f"Reopened PNG:   PSNR = {image_psnr:.4f} dB | SSIM = {image_ssim:.4f} | LPIPS = {image_lpips:.4f}")
-    print(f"Bicubic 2x:     PSNR = {bicubic_psnr0:.4f} dB | SSIM = {bicubic_ssim0:.4f} | LPIPS = {bicubic_lpips0:.4f}")
-    print(f"Delta vs Bicubic: PSNR Difference = {psnr_diff_bicubic:+.4f} dB | SSIM Difference = {ssim_diff_bicubic:+.4f} | LPIPS Difference = {lpips_diff_bicubic:+.4f}")
+    print(
+        f"Direct Tensor:  PSNR = {tensor_psnr:.4f} dB | SSIM = {tensor_ssim:.4f} | LPIPS = {tensor_lpips:.4f}"
+    )
+    print(
+        f"Reopened PNG:   PSNR = {image_psnr:.4f} dB | SSIM = {image_ssim:.4f} | LPIPS = {image_lpips:.4f}"
+    )
+    print(
+        f"Bicubic 2x:     PSNR = {bicubic_psnr0:.4f} dB | SSIM = {bicubic_ssim0:.4f} | LPIPS = {bicubic_lpips0:.4f}"
+    )
+    print(
+        f"Delta vs Bicubic: PSNR Difference = {psnr_diff_bicubic:+.4f} dB | SSIM Difference = {ssim_diff_bicubic:+.4f} | LPIPS Difference = {lpips_diff_bicubic:+.4f}"
+    )
 
     # Part 12: Generate 4-Panel Visual Comparison
     comp_fig_path = os.path.join(comparison_dir, f"{sample0_basename}_comparison.png")
@@ -285,21 +335,29 @@ def run_stage1_pipeline(
 
     fig, axes = plt.subplots(2, 2, figsize=(10, 10))
 
-    axes[0, 0].imshow(lr_np0, cmap='gray')
-    axes[0, 0].set_title(f"INPUT / NoisyLR (128x128)", fontsize=12, fontweight='bold')
-    axes[0, 0].axis('off')
+    axes[0, 0].imshow(lr_np0, cmap="gray")
+    axes[0, 0].set_title(f"INPUT / NoisyLR (128x128)", fontsize=12, fontweight="bold")
+    axes[0, 0].axis("off")
 
-    axes[0, 1].imshow(bicubic_np0, cmap='gray', vmin=0, vmax=1)
-    axes[0, 1].set_title(f"BICUBIC (PSNR: {bicubic_psnr0:.2f}dB, SSIM: {bicubic_ssim0:.4f})", fontsize=12, fontweight='bold')
-    axes[0, 1].axis('off')
+    axes[0, 1].imshow(bicubic_np0, cmap="gray", vmin=0, vmax=1)
+    axes[0, 1].set_title(
+        f"BICUBIC (PSNR: {bicubic_psnr0:.2f}dB, SSIM: {bicubic_ssim0:.4f})",
+        fontsize=12,
+        fontweight="bold",
+    )
+    axes[0, 1].axis("off")
 
-    axes[1, 0].imshow(restored_np0, cmap='gray', vmin=0, vmax=1)
-    axes[1, 0].set_title(f"AIR-NET v1.2 (PSNR: {image_psnr:.2f}dB, SSIM: {image_ssim:.4f})", fontsize=12, fontweight='bold')
-    axes[1, 0].axis('off')
+    axes[1, 0].imshow(restored_np0, cmap="gray", vmin=0, vmax=1)
+    axes[1, 0].set_title(
+        f"AIR-NET v1.2 (PSNR: {image_psnr:.2f}dB, SSIM: {image_ssim:.4f})",
+        fontsize=12,
+        fontweight="bold",
+    )
+    axes[1, 0].axis("off")
 
-    axes[1, 1].imshow(gt_np0, cmap='gray', vmin=0, vmax=1)
-    axes[1, 1].set_title(f"GROUND TRUTH (256x256)", fontsize=12, fontweight='bold')
-    axes[1, 1].axis('off')
+    axes[1, 1].imshow(gt_np0, cmap="gray", vmin=0, vmax=1)
+    axes[1, 1].set_title(f"GROUND TRUTH (256x256)", fontsize=12, fontweight="bold")
+    axes[1, 1].axis("off")
 
     plt.tight_layout()
     plt.savefig(comp_fig_path, dpi=150)
@@ -310,29 +368,29 @@ def run_stage1_pipeline(
     r0, c0 = find_best_edge_crop(gt_np0, crop_size=64)
     r0_lr, c0_lr = r0 // 2, c0 // 2
 
-    lr_crop = lr_np0[r0_lr:r0_lr+32, c0_lr:c0_lr+32]
-    bicubic_crop = bicubic_np0[r0:r0+64, c0:c0+64]
-    airnet_crop = restored_np0[r0:r0+64, c0:c0+64]
-    gt_crop = gt_np0[r0:r0+64, c0:c0+64]
+    lr_crop = lr_np0[r0_lr : r0_lr + 32, c0_lr : c0_lr + 32]
+    bicubic_crop = bicubic_np0[r0 : r0 + 64, c0 : c0 + 64]
+    airnet_crop = restored_np0[r0 : r0 + 64, c0 : c0 + 64]
+    gt_crop = gt_np0[r0 : r0 + 64, c0 : c0 + 64]
 
     zoom_fig_path = os.path.join(comparison_dir, f"{sample0_basename}_zoom.png")
     fig2, axes2 = plt.subplots(1, 4, figsize=(16, 4))
 
-    axes2[0].imshow(lr_crop, cmap='gray')
-    axes2[0].set_title("Input NoisyLR Crop (32x32)", fontsize=10, fontweight='bold')
-    axes2[0].axis('off')
+    axes2[0].imshow(lr_crop, cmap="gray")
+    axes2[0].set_title("Input NoisyLR Crop (32x32)", fontsize=10, fontweight="bold")
+    axes2[0].axis("off")
 
-    axes2[1].imshow(bicubic_crop, cmap='gray', vmin=0, vmax=1)
-    axes2[1].set_title("Bicubic Crop (64x64)", fontsize=10, fontweight='bold')
-    axes2[1].axis('off')
+    axes2[1].imshow(bicubic_crop, cmap="gray", vmin=0, vmax=1)
+    axes2[1].set_title("Bicubic Crop (64x64)", fontsize=10, fontweight="bold")
+    axes2[1].axis("off")
 
-    axes2[2].imshow(airnet_crop, cmap='gray', vmin=0, vmax=1)
-    axes2[2].set_title("AIR-Net v1.2 Crop (64x64)", fontsize=10, fontweight='bold')
-    axes2[2].axis('off')
+    axes2[2].imshow(airnet_crop, cmap="gray", vmin=0, vmax=1)
+    axes2[2].set_title("AIR-Net v1.2 Crop (64x64)", fontsize=10, fontweight="bold")
+    axes2[2].axis("off")
 
-    axes2[3].imshow(gt_crop, cmap='gray', vmin=0, vmax=1)
-    axes2[3].set_title("Ground Truth Crop (64x64)", fontsize=10, fontweight='bold')
-    axes2[3].axis('off')
+    axes2[3].imshow(gt_crop, cmap="gray", vmin=0, vmax=1)
+    axes2[3].set_title("Ground Truth Crop (64x64)", fontsize=10, fontweight="bold")
+    axes2[3].axis("off")
 
     plt.tight_layout()
     plt.savefig(zoom_fig_path, dpi=150)
@@ -340,14 +398,16 @@ def run_stage1_pipeline(
     print(f"Saved high-frequency detail zoom crop to: {zoom_fig_path}")
 
     # Part 19 & 20: Degradation Analysis Placeholder JSON
-    deg_json_path = os.path.join(degradation_dir, f"{sample0_basename}_degradation.json")
+    deg_json_path = os.path.join(
+        degradation_dir, f"{sample0_basename}_degradation.json"
+    )
     deg_data = {
         "filename": fname0,
         "noise_output": float(out_dict0["noise"].item()),
         "blur_output": float(out_dict0["blur"].item()),
         "texture_output": float(out_dict0["texture"].item()),
         "validated": False,
-        "notice": "Noise estimation output exists but requires independent calibration/validation in Stage 2."
+        "notice": "Noise estimation output exists but requires independent calibration/validation in Stage 2.",
     }
     with open(deg_json_path, "w") as f:
         json.dump(deg_data, f, indent=4)
@@ -366,7 +426,13 @@ def run_stage1_pipeline(
 
             out_dicti = model(lr_bi)
             restored_ti = torch.clamp(out_dicti["restored"], 0.0, 1.0)
-            bicubic_bi = torch.clamp(F.interpolate(lr_bi, size=(256, 256), mode='bicubic', align_corners=False), 0.0, 1.0)
+            bicubic_bi = torch.clamp(
+                F.interpolate(
+                    lr_bi, size=(256, 256), mode="bicubic", align_corners=False
+                ),
+                0.0,
+                1.0,
+            )
 
             # Save PNG files for each sample
             bnamei = fnamei.replace(".npy", "")
@@ -374,9 +440,15 @@ def run_stage1_pipeline(
             gt_npi = gt_ti.squeeze().cpu().numpy()
             restored_npi = restored_ti.squeeze().cpu().numpy()
 
-            Image.fromarray((np.clip(lr_npi, 0, 1)*255).astype(np.uint8)).save(os.path.join(input_dir, f"{bnamei}_input.png"))
-            Image.fromarray((np.clip(restored_npi, 0, 1)*255).astype(np.uint8)).save(os.path.join(restored_dir, f"{bnamei}_restored.png"))
-            Image.fromarray((np.clip(gt_npi, 0, 1)*255).astype(np.uint8)).save(os.path.join(gt_dir_out, f"{bnamei}_gt.png"))
+            Image.fromarray((np.clip(lr_npi, 0, 1) * 255).astype(np.uint8)).save(
+                os.path.join(input_dir, f"{bnamei}_input.png")
+            )
+            Image.fromarray((np.clip(restored_npi, 0, 1) * 255).astype(np.uint8)).save(
+                os.path.join(restored_dir, f"{bnamei}_restored.png")
+            )
+            Image.fromarray((np.clip(gt_npi, 0, 1) * 255).astype(np.uint8)).save(
+                os.path.join(gt_dir_out, f"{bnamei}_gt.png")
+            )
 
             # Calculate metrics
             psnr_i = calculate_psnr(restored_ti, gt_bi)
@@ -398,13 +470,16 @@ def run_stage1_pipeline(
                 "lpips": round(lpips_i, 4),
                 "bicubic_psnr": round(bic_psnr_i, 4),
                 "bicubic_ssim": round(bic_ssim_i, 4),
-                "bicubic_lpips": round(bic_lpips_i, 4)
+                "bicubic_lpips": round(bic_lpips_i, 4),
             }
             csv_rows.append(row)
-            print(f"  [{i+1:02d}/10] {fnamei}: AIR-Net PSNR = {psnr_i:.4f} dB, SSIM = {ssim_i:.4f} | Bicubic PSNR = {bic_psnr_i:.4f} dB")
+            print(
+                f"  [{i+1:02d}/10] {fnamei}: AIR-Net PSNR = {psnr_i:.4f} dB, SSIM = {ssim_i:.4f} | Bicubic PSNR = {bic_psnr_i:.4f} dB"
+            )
 
     # Write CSV
     import csv
+
     with open(csv_metrics_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(csv_rows[0].keys()))
         writer.writeheader()
@@ -487,14 +562,35 @@ def run_stage1_pipeline(
     print(f"\nSaved Stage 1 report to: {report_path}")
     print(stage1_report)
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Stage 1 Image Restoration Inference Pipeline")
-    parser.add_argument("--input", type=str, default=None, help="Path to input NoisyLR image (.npy or .png)")
-    parser.add_argument("--output", type=str, default=None, help="Path to output restored PNG file")
-    parser.add_argument("--checkpoint", type=str, default=None, help="Path to AIR-Net v1.2 checkpoint")
-    parser.add_argument("--device", type=str, default="auto", help="Device to execute inference")
-    parser.add_argument("--gt", type=str, default=None, help="Path to Ground Truth image")
-    parser.add_argument("--num_samples", type=int, default=10, help="Number of samples for batch inference")
+    parser = argparse.ArgumentParser(
+        description="Stage 1 Image Restoration Inference Pipeline"
+    )
+    parser.add_argument(
+        "--input",
+        type=str,
+        default=None,
+        help="Path to input NoisyLR image (.npy or .png)",
+    )
+    parser.add_argument(
+        "--output", type=str, default=None, help="Path to output restored PNG file"
+    )
+    parser.add_argument(
+        "--checkpoint", type=str, default=None, help="Path to AIR-Net v1.2 checkpoint"
+    )
+    parser.add_argument(
+        "--device", type=str, default="auto", help="Device to execute inference"
+    )
+    parser.add_argument(
+        "--gt", type=str, default=None, help="Path to Ground Truth image"
+    )
+    parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=10,
+        help="Number of samples for batch inference",
+    )
 
     args = parser.parse_args()
     run_stage1_pipeline(
@@ -503,5 +599,5 @@ if __name__ == "__main__":
         checkpoint_path=args.checkpoint,
         device_str=args.device,
         gt_path=args.gt,
-        num_samples=args.num_samples
+        num_samples=args.num_samples,
     )

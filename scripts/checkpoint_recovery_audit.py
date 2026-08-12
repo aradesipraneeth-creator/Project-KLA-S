@@ -1,3 +1,6 @@
+from utils.device import get_device
+from models.airnet import AIRNet
+from configs.config import Config
 import os
 import sys
 import glob
@@ -9,9 +12,6 @@ import torch
 # Ensure project root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from configs.config import Config
-from models.airnet import AIRNet
-from utils.device import get_device
 
 def get_sha256(filepath: str) -> str:
     """Computes SHA256 checksum of a file."""
@@ -20,6 +20,7 @@ def get_sha256(filepath: str) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
+
 
 def scan_for_checkpoints():
     print("====================================================")
@@ -48,7 +49,9 @@ def scan_for_checkpoints():
                     found_files.add(os.path.abspath(os.path.join(d, f)))
 
     candidates = sorted(list(found_files))
-    print(f"Found {len(candidates)} candidate checkpoint file(s) across target locations.\n")
+    print(
+        f"Found {len(candidates)} candidate checkpoint file(s) across target locations.\n"
+    )
 
     recovery_dir = os.path.join("outputs", "stage1", "checkpoint_recovery")
     os.makedirs(recovery_dir, exist_ok=True)
@@ -58,8 +61,12 @@ def scan_for_checkpoints():
     os.makedirs(quarantine_dir, exist_ok=True)
     quarantine_txt_path = os.path.join(recovery_dir, "quarantine_report.txt")
 
-    suspect_path = os.path.join("outputs", "v1_2", "checkpoints", "airnet_v1_2_ema_best_model.pth")
-    quarantined_path = os.path.join(quarantine_dir, "airnet_v1_2_ema_best_model_RANDOM_UNTRAINED.pth")
+    suspect_path = os.path.join(
+        "outputs", "v1_2", "checkpoints", "airnet_v1_2_ema_best_model.pth"
+    )
+    quarantined_path = os.path.join(
+        quarantine_dir, "airnet_v1_2_ema_best_model_RANDOM_UNTRAINED.pth"
+    )
 
     if os.path.exists(suspect_path):
         os.replace(suspect_path, quarantined_path)
@@ -95,7 +102,7 @@ def scan_for_checkpoints():
     cand_lines = [
         "====================================================\n",
         "AIR-NET V1.2 CANDIDATE CHECKPOINTS SEARCH REPORT\n",
-        "====================================================\n\n"
+        "====================================================\n\n",
     ]
 
     detailed_info = []
@@ -109,7 +116,9 @@ def scan_for_checkpoints():
 
         cand_lines.append(f"Candidate {idx}:\n")
         cand_lines.append(f"  Path:     {path}\n")
-        cand_lines.append(f"  Size:     {size_bytes:,} bytes ({size_bytes / (1024*1024):.2f} MB)\n")
+        cand_lines.append(
+            f"  Size:     {size_bytes:,} bytes ({size_bytes / (1024*1024):.2f} MB)\n"
+        )
         cand_lines.append(f"  Modified: {mtime}\n")
         cand_lines.append(f"  SHA256:   {sha256}\n\n")
 
@@ -133,10 +142,14 @@ def scan_for_checkpoints():
                 best_ssim_val = str(ckpt_data.get("best_ssim", "NOT AVAILABLE"))
                 model_version_val = str(ckpt_data.get("model_version", "NOT AVAILABLE"))
 
-                ema_status = "AVAILABLE" if "ema_state_dict" in ckpt_data else "NOT AVAILABLE"
+                ema_status = (
+                    "AVAILABLE" if "ema_state_dict" in ckpt_data else "NOT AVAILABLE"
+                )
 
                 # Check weight parameters
-                state_dict = ckpt_data.get("ema_state_dict", ckpt_data.get("model_state_dict", ckpt_data))
+                state_dict = ckpt_data.get(
+                    "ema_state_dict", ckpt_data.get("model_state_dict", ckpt_data)
+                )
                 if isinstance(state_dict, dict):
                     model = AIRNet(
                         in_channels=config.in_channels,
@@ -147,10 +160,13 @@ def scan_for_checkpoints():
                         enc_blocks=config.enc_blocks,
                         latent_blocks=config.latent_blocks,
                         dec_blocks=config.dec_blocks,
-                        ffn_expansion_factor=config.ffn_expansion_factor
+                        ffn_expansion_factor=config.ffn_expansion_factor,
                     )
                     load_res = model.load_state_dict(state_dict, strict=False)
-                    if len(load_res.missing_keys) == 0 and len(load_res.unexpected_keys) == 0:
+                    if (
+                        len(load_res.missing_keys) == 0
+                        and len(load_res.unexpected_keys) == 0
+                    ):
                         arch_compat = "YES"
                         param_count = sum(p.numel() for p in model.parameters())
 
@@ -183,7 +199,7 @@ def scan_for_checkpoints():
             "best_psnr": best_psnr_val,
             "best_ssim": best_ssim_val,
             "status": status_label,
-            "keys": keys_list
+            "keys": keys_list,
         }
         detailed_info.append(info_dict)
 
@@ -196,7 +212,7 @@ def scan_for_checkpoints():
     ident_lines = [
         "====================================================\n",
         "AIR-NET V1.2 CHECKPOINT IDENTITY & DISCOVERY REPORT\n",
-        "====================================================\n\n"
+        "====================================================\n\n",
     ]
 
     for item in detailed_info:
@@ -225,6 +241,7 @@ def scan_for_checkpoints():
     print(f"Total Candidates Analyzed:          {len(detailed_info)}")
     print(f"Genuine Trained Checkpoints Found:  {len(trained_found)}")
     print("--------------------------------------------------")
+
 
 if __name__ == "__main__":
     scan_for_checkpoints()

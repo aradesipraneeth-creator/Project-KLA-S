@@ -1,3 +1,7 @@
+from utils.device import get_device, print_device_info, is_cuda
+from utils.metrics import calculate_psnr, calculate_ssim
+from models.airnet import AIRNet
+from configs.config import Config
 import os
 import sys
 import json
@@ -14,14 +18,12 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 # Ensure project root is on sys.path
-PROJECT_ROOT = os.environ.get("KLA_PROJECT_ROOT", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+PROJECT_ROOT = os.environ.get(
+    "KLA_PROJECT_ROOT", os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from configs.config import Config
-from models.airnet import AIRNet
-from utils.metrics import calculate_psnr, calculate_ssim
-from utils.device import get_device, print_device_info, is_cuda
 
 def seed_everything(seed=42):
     random.seed(seed)
@@ -29,6 +31,7 @@ def seed_everything(seed=42):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
 
 def get_file_sha256(filepath: str) -> str:
     if not os.path.exists(filepath):
@@ -39,13 +42,15 @@ def get_file_sha256(filepath: str) -> str:
             hasher.update(chunk)
     return hasher.hexdigest()
 
+
 def compute_lpips_safe(pred_tensor: torch.Tensor, gt_tensor: torch.Tensor) -> float:
     """Computes LPIPS distance safely in Float32 to prevent FP16 metric kernel errors."""
     p_float = pred_tensor.float().clamp(0.0, 1.0)
     g_float = gt_tensor.float().clamp(0.0, 1.0)
     try:
         import lpips
-        loss_fn = lpips.LPIPS(net='alex', verbose=False).to(p_float.device)
+
+        loss_fn = lpips.LPIPS(net="alex", verbose=False).to(p_float.device)
         p3 = p_float.repeat(1, 3, 1, 1) * 2.0 - 1.0
         g3 = g_float.repeat(1, 3, 1, 1) * 2.0 - 1.0
         with torch.no_grad():
@@ -56,16 +61,25 @@ def compute_lpips_safe(pred_tensor: torch.Tensor, gt_tensor: torch.Tensor) -> fl
             dist = F.l1_loss(p_float, g_float).item()
         return dist
 
+
 # --- Float32 Analytical Convolution Kernels (Section 1 Safety) ---
-def compute_gaussian_blur(img_tensor: torch.Tensor, kernel_size: int = 5, sigma: float = 1.0) -> torch.Tensor:
+
+
+def compute_gaussian_blur(
+    img_tensor: torch.Tensor, kernel_size: int = 5, sigma: float = 1.0
+) -> torch.Tensor:
     """Computes Gaussian Blur in Float32."""
     img_f = img_tensor.float()
-    coords = torch.arange(kernel_size, dtype=torch.float32, device=img_f.device) - (kernel_size - 1) / 2.0
-    g1d = torch.exp(-coords**2 / (2 * sigma**2))
+    coords = (
+        torch.arange(kernel_size, dtype=torch.float32, device=img_f.device)
+        - (kernel_size - 1) / 2.0
+    )
+    g1d = torch.exp(-(coords**2) / (2 * sigma**2))
     g1d = g1d / g1d.sum()
     g2d = g1d.unsqueeze(1) @ g1d.unsqueeze(0)
     kernel = g2d.view(1, 1, kernel_size, kernel_size)
     return F.conv2d(img_f, kernel, padding=kernel_size // 2)
+
 
 def compute_high_frequency_map(img_tensor: torch.Tensor) -> torch.Tensor:
     """Extracts High-Frequency component (Image - BlurredImage) in Float32."""
@@ -73,55 +87,98 @@ def compute_high_frequency_map(img_tensor: torch.Tensor) -> torch.Tensor:
     blurred = compute_gaussian_blur(img_f, kernel_size=5, sigma=1.0)
     return img_f - blurred
 
+
 def compute_hf_energy(img_tensor: torch.Tensor) -> float:
     """Computes High-Frequency Energy in Float32."""
     hf_map = compute_high_frequency_map(img_tensor)
     return float(torch.mean(hf_map**2).item())
 
+
 def compute_sobel_edge(img_tensor: torch.Tensor) -> torch.Tensor:
     """Computes Sobel edge magnitude map safely in Float32."""
     img_f = img_tensor.float()
-    sobel_x = torch.tensor([[-1., 0., 1.], [-2., 0., 2.], [-1., 0., 1.]], dtype=torch.float32, device=img_f.device).view(1, 1, 3, 3)
-    sobel_y = torch.tensor([[-1., -2., -1.], [0., 0., 0.], [1., 2., 1.]], dtype=torch.float32, device=img_f.device).view(1, 1, 3, 3)
-    
+    sobel_x = torch.tensor(
+        [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]],
+        dtype=torch.float32,
+        device=img_f.device,
+    ).view(1, 1, 3, 3)
+    sobel_y = torch.tensor(
+        [[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]],
+        dtype=torch.float32,
+        device=img_f.device,
+    ).view(1, 1, 3, 3)
+
     gx = F.conv2d(img_f, sobel_x, padding=1)
     gy = F.conv2d(img_f, sobel_y, padding=1)
     edge = torch.sqrt(gx**2 + gy**2 + 1e-8)
     return edge
 
+
 def compute_sobel_gradient_energy(img_tensor: torch.Tensor) -> float:
     """Computes Sobel Gradient Energy in Float32."""
     img_f = img_tensor.float()
-    sobel_x = torch.tensor([[-1., 0., 1.], [-2., 0., 2.], [-1., 0., 1.]], dtype=torch.float32, device=img_f.device).view(1, 1, 3, 3)
-    sobel_y = torch.tensor([[-1., -2., -1.], [0., 0., 0.], [1., 2., 1.]], dtype=torch.float32, device=img_f.device).view(1, 1, 3, 3)
-    
+    sobel_x = torch.tensor(
+        [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]],
+        dtype=torch.float32,
+        device=img_f.device,
+    ).view(1, 1, 3, 3)
+    sobel_y = torch.tensor(
+        [[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]],
+        dtype=torch.float32,
+        device=img_f.device,
+    ).view(1, 1, 3, 3)
+
     gx = F.conv2d(img_f, sobel_x, padding=1)
     gy = F.conv2d(img_f, sobel_y, padding=1)
     grad_mag_sq = gx**2 + gy**2
     return float(torch.mean(grad_mag_sq).item())
 
+
 def compute_laplacian_energy(img_tensor: torch.Tensor) -> float:
     """Computes Laplacian Energy in Float32."""
     img_f = img_tensor.float()
-    lap_kernel = torch.tensor([[0., 1., 0.], [1., -4., 1.], [0., 1., 0.]], dtype=torch.float32, device=img_f.device).view(1, 1, 3, 3)
+    lap_kernel = torch.tensor(
+        [[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]],
+        dtype=torch.float32,
+        device=img_f.device,
+    ).view(1, 1, 3, 3)
     lap_map = F.conv2d(img_f, lap_kernel, padding=1)
     return float(torch.mean(lap_map**2).item())
+
 
 def main():
     seed_everything(42)
     start_time = time.time()
 
-    print("==============================================================================")
+    print(
+        "=============================================================================="
+    )
     print("AIR-Net v1 — STAGE 2 COMPLETE EXPERIMENTAL AUDIT (2A -> 2E)")
-    print("==============================================================================")
+    print(
+        "=============================================================================="
+    )
 
     # 1. Hardware & Environment Detection (Section 1)
     device = get_device()
-    gpu_name = torch.cuda.get_device_name(0) if is_cuda() else ("MPS" if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available() else "CPU Mode")
-    gpu_mem = f"{torch.cuda.get_device_properties(0).total_memory / (1024**3):.2f} GB" if is_cuda() else "N/A"
+    gpu_name = (
+        torch.cuda.get_device_name(0)
+        if is_cuda()
+        else (
+            "MPS"
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+            else "CPU Mode"
+        )
+    )
+    gpu_mem = (
+        f"{torch.cuda.get_device_properties(0).total_memory / (1024**3):.2f} GB"
+        if is_cuda()
+        else "N/A"
+    )
     pytorch_ver = torch.__version__
     cuda_ver = torch.version.cuda if is_cuda() else "N/A"
-    python_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    python_ver = (
+        f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    )
 
     print(f"Project Root:      {PROJECT_ROOT}")
     print(f"Python Version:    {python_ver}")
@@ -130,7 +187,9 @@ def main():
     print(f"Device:            {device}")
     print(f"GPU Name:          {gpu_name}")
     print(f"GPU Memory:        {gpu_mem}")
-    print("==============================================================================\n")
+    print(
+        "==============================================================================\n"
+    )
 
     # Output Root Directories (Section 7)
     stage2_root = os.path.join(PROJECT_ROOT, "outputs", "stage2")
@@ -145,13 +204,23 @@ def main():
         os.makedirs(os.path.join(d, "reports"), exist_ok=True)
         os.makedirs(os.path.join(d, "visualizations"), exist_ok=True)
 
-    os.makedirs(os.path.join(stage2e_dir, "authoritative_validation_mapping"), exist_ok=True)
+    os.makedirs(
+        os.path.join(stage2e_dir, "authoritative_validation_mapping"), exist_ok=True
+    )
 
     # 2. Authoritative Validation Basis Lock (Section 4 & 5)
     print("--- [1/6] AUTHORITATIVE VALIDATION MAPPING LOCK ---")
-    stage1_mapping_csv = os.path.join(PROJECT_ROOT, "outputs", "stage1", "stage1_reconstruction", "authoritative_validation_mapping.csv")
+    stage1_mapping_csv = os.path.join(
+        PROJECT_ROOT,
+        "outputs",
+        "stage1",
+        "stage1_reconstruction",
+        "authoritative_validation_mapping.csv",
+    )
     if not os.path.exists(stage1_mapping_csv):
-        raise FileNotFoundError(f"Stage 1 Authoritative Validation Mapping CSV missing at '{stage1_mapping_csv}'")
+        raise FileNotFoundError(
+            f"Stage 1 Authoritative Validation Mapping CSV missing at '{stage1_mapping_csv}'"
+        )
 
     val_mapping = []
     with open(stage1_mapping_csv, "r", encoding="utf-8") as f:
@@ -159,12 +228,20 @@ def main():
         for row in reader:
             val_mapping.append(row)
 
-    assert len(val_mapping) == 320, f"Expected 320 canonical validation rows, got {len(val_mapping)}"
+    assert (
+        len(val_mapping) == 320
+    ), f"Expected 320 canonical validation rows, got {len(val_mapping)}"
     mapping_sha256 = get_file_sha256(stage1_mapping_csv)
-    print(f"Loaded Stage 1 Authoritative Validation Mapping: 320 rows (SHA256: {mapping_sha256})")
+    print(
+        f"Loaded Stage 1 Authoritative Validation Mapping: 320 rows (SHA256: {mapping_sha256})"
+    )
 
     # Copy mapping into Stage 2E directory for self-containment
-    stage2_mapping_csv = os.path.join(stage2e_dir, "authoritative_validation_mapping", "authoritative_validation_mapping.csv")
+    stage2_mapping_csv = os.path.join(
+        stage2e_dir,
+        "authoritative_validation_mapping",
+        "authoritative_validation_mapping.csv",
+    )
     with open(stage2_mapping_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(val_mapping[0].keys()))
         writer.writeheader()
@@ -182,15 +259,19 @@ def main():
         enc_blocks=config.enc_blocks,
         latent_blocks=config.latent_blocks,
         dec_blocks=config.dec_blocks,
-        ffn_expansion_factor=config.ffn_expansion_factor
+        ffn_expansion_factor=config.ffn_expansion_factor,
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
     print(f"AIR-Net v1 Parameter Count: {num_params:,} (Expected: 7,285,399)")
-    assert abs(num_params - 7285399) == 0, f"Parameter count mismatch! Expected 7285399, got {num_params}"
+    assert (
+        abs(num_params - 7285399) == 0
+    ), f"Parameter count mismatch! Expected 7285399, got {num_params}"
 
     ckpt_candidates = [
-        os.path.join(PROJECT_ROOT, "outputs", "checkpoints", "airnet_ema_best_model.pth"),
+        os.path.join(
+            PROJECT_ROOT, "outputs", "checkpoints", "airnet_ema_best_model.pth"
+        ),
         os.path.join(PROJECT_ROOT, "outputs", "checkpoints", "ema_best_model.pth"),
         os.path.join(PROJECT_ROOT, "outputs", "checkpoints", "best_model.pth"),
     ]
@@ -205,11 +286,17 @@ def main():
     if chosen_ckpt and os.path.exists(chosen_ckpt):
         ckpt_sha256 = get_file_sha256(chosen_ckpt)
         ckpt_data = torch.load(chosen_ckpt, map_location=device)
-        state_dict = ckpt_data.get("ema_state_dict", ckpt_data.get("model_state_dict", ckpt_data))
+        state_dict = ckpt_data.get(
+            "ema_state_dict", ckpt_data.get("model_state_dict", ckpt_data)
+        )
         model.load_state_dict(state_dict, strict=True)
-        print(f"Loaded READ-ONLY trained checkpoint: {chosen_ckpt} (SHA256: {ckpt_sha256})")
+        print(
+            f"Loaded READ-ONLY trained checkpoint: {chosen_ckpt} (SHA256: {ckpt_sha256})"
+        )
     else:
-        print("NOTICE: No pre-trained binary .pth checkpoint file found on local disk. Evaluating baseline model state.")
+        print(
+            "NOTICE: No pre-trained binary .pth checkpoint file found on local disk. Evaluating baseline model state."
+        )
 
     model.eval()
 
@@ -233,14 +320,16 @@ def main():
         lr_tensor = torch.from_numpy(lr_arr).unsqueeze(0).to(device)
         gt_tensor = torch.from_numpy(gt_arr).unsqueeze(0).to(device)
 
-        val_samples.append({
-            "val_index": idx,
-            "filename": fname,
-            "lr_tensor": lr_tensor,
-            "gt_tensor": gt_tensor,
-            "lr_np": lr_arr.squeeze(),
-            "gt_np": gt_arr.squeeze()
-        })
+        val_samples.append(
+            {
+                "val_index": idx,
+                "filename": fname,
+                "lr_tensor": lr_tensor,
+                "gt_tensor": gt_tensor,
+                "lr_np": lr_arr.squeeze(),
+                "gt_np": gt_arr.squeeze(),
+            }
+        )
 
     print(f"Successfully loaded {len(val_samples)} validation samples into memory.")
 
@@ -261,10 +350,20 @@ def main():
 
             # Forward Pass AIR-Net
             out_dict = model(lr_t)
-            pred_airnet = torch.clamp(out_dict["restored"] if isinstance(out_dict, dict) else out_dict, 0.0, 1.0)
+            pred_airnet = torch.clamp(
+                out_dict["restored"] if isinstance(out_dict, dict) else out_dict,
+                0.0,
+                1.0,
+            )
 
             # Forward Pass Bicubic 2x
-            pred_bicubic = torch.clamp(F.interpolate(lr_t.float(), size=(256, 256), mode='bicubic', align_corners=False), 0.0, 1.0)
+            pred_bicubic = torch.clamp(
+                F.interpolate(
+                    lr_t.float(), size=(256, 256), mode="bicubic", align_corners=False
+                ),
+                0.0,
+                1.0,
+            )
 
             # Standard Metrics
             psnr_airnet = calculate_psnr(pred_airnet, gt_t, data_range=1.0)
@@ -308,17 +407,23 @@ def main():
                 "AIR-Net Laplacian Energy": round(lap_airnet, 8),
                 "GT Laplacian Energy": round(lap_gt, 8),
                 "Bicubic Laplacian Energy": round(lap_bicubic, 8),
-                "Laplacian Retention Ratio": round(lap_retention, 6)
+                "Laplacian Retention Ratio": round(lap_retention, 6),
             }
             s2a_rows.append(s2a_row)
 
             # --- Stage 2B Detail Loss Classification ---
-            is_severe = psnr_diff < -3.0 or (psnr_airnet < psnr_bicubic and ssim_diff < 0)
+            is_severe = psnr_diff < -3.0 or (
+                psnr_airnet < psnr_bicubic and ssim_diff < 0
+            )
             is_moderate = psnr_diff < 0.0 or ssim_diff < 0.05
             psnr_win = psnr_airnet > psnr_bicubic
             ssim_win = ssim_airnet > ssim_bicubic
 
-            detail_class = "Severe Detail Loss" if is_severe else ("Moderate Detail Loss" if is_moderate else "Preserved Detail")
+            detail_class = (
+                "Severe Detail Loss"
+                if is_severe
+                else ("Moderate Detail Loss" if is_moderate else "Preserved Detail")
+            )
 
             s2b_row = {
                 "canonical_id": idx,
@@ -332,13 +437,17 @@ def main():
                 "Detail Loss Classification": detail_class,
                 "AIR-Net PSNR Win": psnr_win,
                 "Bicubic PSNR Win": not psnr_win,
-                "AIR-Net SSIM Win": ssim_win
+                "AIR-Net SSIM Win": ssim_win,
             }
             s2b_rows.append(s2b_row)
 
             # --- Stage 2D Degradation Statistics ---
-            res_airnet = float(torch.mean(torch.abs(pred_airnet.float() - gt_t.float())).item())
-            res_bicubic = float(torch.mean(torch.abs(pred_bicubic.float() - gt_t.float())).item())
+            res_airnet = float(
+                torch.mean(torch.abs(pred_airnet.float() - gt_t.float())).item()
+            )
+            res_bicubic = float(
+                torch.mean(torch.abs(pred_bicubic.float() - gt_t.float())).item()
+            )
 
             s2d_row = {
                 "canonical_id": idx,
@@ -347,7 +456,7 @@ def main():
                 "Bicubic MAE Residual": round(res_bicubic, 6),
                 "AIR-Net StdDev": round(float(pred_airnet.float().std().item()), 6),
                 "GT StdDev": round(float(gt_t.float().std().item()), 6),
-                "Bicubic StdDev": round(float(pred_bicubic.float().std().item()), 6)
+                "Bicubic StdDev": round(float(pred_bicubic.float().std().item()), 6),
             }
             s2d_rows.append(s2d_row)
 
@@ -384,7 +493,7 @@ def main():
         "mean_laplacian_energy_airnet": round(avg_lap_airnet, 8),
         "historical_reference_hf_retention": hist_hf_retention,
         "historical_reference_gradient_energy": hist_grad_airnet,
-        "historical_reference_laplacian_energy": hist_lap_airnet
+        "historical_reference_laplacian_energy": hist_lap_airnet,
     }
     with open(os.path.join(stage2a_dir, "reports", "stage2a_summary.json"), "w") as f:
         json.dump(s2a_summary, f, indent=4)
@@ -411,8 +520,15 @@ def main():
         writer.writeheader()
         writer.writerows(s2b_rows)
 
-    severe_count = sum(1 for r in s2b_rows if r["Detail Loss Classification"] == "Severe Detail Loss")
-    moderate_count = sum(1 for r in s2b_rows if r["Detail Loss Classification"] in ["Severe Detail Loss", "Moderate Detail Loss"])
+    severe_count = sum(
+        1 for r in s2b_rows if r["Detail Loss Classification"] == "Severe Detail Loss"
+    )
+    moderate_count = sum(
+        1
+        for r in s2b_rows
+        if r["Detail Loss Classification"]
+        in ["Severe Detail Loss", "Moderate Detail Loss"]
+    )
     psnr_wins_airnet = sum(1 for r in s2b_rows if r["AIR-Net PSNR Win"])
     psnr_wins_bicubic = sum(1 for r in s2b_rows if r["Bicubic PSNR Win"])
     ssim_wins_airnet = sum(1 for r in s2b_rows if r["AIR-Net SSIM Win"])
@@ -429,7 +545,7 @@ def main():
         "historical_reference_moderate_loss": 310,
         "historical_reference_psnr_wins": 1,
         "historical_reference_bicubic_wins": 319,
-        "historical_reference_ssim_wins": 25
+        "historical_reference_ssim_wins": 25,
     }
     with open(os.path.join(stage2b_dir, "reports", "stage2b_summary.json"), "w") as f:
         json.dump(s2b_summary, f, indent=4)
@@ -466,46 +582,74 @@ def main():
 
         # 6-Panel Visualization
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-        axes[0, 0].imshow(lr_np, cmap='gray')
-        axes[0, 0].set_title("Input NoisyLR (128x128)", fontsize=11, fontweight='bold')
-        axes[0, 0].axis('off')
+        axes[0, 0].imshow(lr_np, cmap="gray")
+        axes[0, 0].set_title("Input NoisyLR (128x128)", fontsize=11, fontweight="bold")
+        axes[0, 0].axis("off")
 
-        axes[0, 1].imshow(bicubic_np, cmap='gray', vmin=0, vmax=1)
-        axes[0, 1].set_title(f"Bicubic (PSNR: {s['psnr_bicubic']:.2f}dB)", fontsize=11, fontweight='bold')
-        axes[0, 1].axis('off')
+        axes[0, 1].imshow(bicubic_np, cmap="gray", vmin=0, vmax=1)
+        axes[0, 1].set_title(
+            f"Bicubic (PSNR: {s['psnr_bicubic']:.2f}dB)", fontsize=11, fontweight="bold"
+        )
+        axes[0, 1].axis("off")
 
-        axes[0, 2].imshow(airnet_np, cmap='gray', vmin=0, vmax=1)
-        axes[0, 2].set_title(f"AIR-Net v1 (PSNR: {s['psnr_airnet']:.2f}dB)", fontsize=11, fontweight='bold')
-        axes[0, 2].axis('off')
+        axes[0, 2].imshow(airnet_np, cmap="gray", vmin=0, vmax=1)
+        axes[0, 2].set_title(
+            f"AIR-Net v1 (PSNR: {s['psnr_airnet']:.2f}dB)",
+            fontsize=11,
+            fontweight="bold",
+        )
+        axes[0, 2].axis("off")
 
-        axes[1, 0].imshow(gt_np, cmap='gray', vmin=0, vmax=1)
-        axes[1, 0].set_title("Ground Truth (256x256)", fontsize=11, fontweight='bold')
-        axes[1, 0].axis('off')
+        axes[1, 0].imshow(gt_np, cmap="gray", vmin=0, vmax=1)
+        axes[1, 0].set_title("Ground Truth (256x256)", fontsize=11, fontweight="bold")
+        axes[1, 0].axis("off")
 
-        axes[1, 1].imshow(err_np, cmap='inferno')
-        axes[1, 1].set_title(f"Absolute Error (MAE: {np.mean(err_np):.4f})", fontsize=11, fontweight='bold')
-        axes[1, 1].axis('off')
+        axes[1, 1].imshow(err_np, cmap="inferno")
+        axes[1, 1].set_title(
+            f"Absolute Error (MAE: {np.mean(err_np):.4f})",
+            fontsize=11,
+            fontweight="bold",
+        )
+        axes[1, 1].axis("off")
 
-        axes[1, 2].imshow(edge_np, cmap='viridis')
-        axes[1, 2].set_title("Sobel Edge Map", fontsize=11, fontweight='bold')
-        axes[1, 2].axis('off')
+        axes[1, 2].imshow(edge_np, cmap="viridis")
+        axes[1, 2].set_title("Sobel Edge Map", fontsize=11, fontweight="bold")
+        axes[1, 2].axis("off")
 
         plt.tight_layout()
-        fail_img_path = os.path.join(stage2c_dir, "visualizations", f"{bname}_failure_six_panel.png")
+        fail_img_path = os.path.join(
+            stage2c_dir, "visualizations", f"{bname}_failure_six_panel.png"
+        )
         plt.savefig(fail_img_path, dpi=150)
         plt.close(fig)
 
-        fail_manifest_rows.append({
-            "canonical_id": s["val_index"],
-            "filename": s["filename"],
-            "airnet_psnr": round(s["psnr_airnet"], 4),
-            "bicubic_psnr": round(s["psnr_bicubic"], 4),
-            "psnr_gap": round(s["psnr_diff"], 4),
-            "image_panel_path": os.path.relpath(fail_img_path, PROJECT_ROOT)
-        })
+        fail_manifest_rows.append(
+            {
+                "canonical_id": s["val_index"],
+                "filename": s["filename"],
+                "airnet_psnr": round(s["psnr_airnet"], 4),
+                "bicubic_psnr": round(s["psnr_bicubic"], 4),
+                "psnr_gap": round(s["psnr_diff"], 4),
+                "image_panel_path": os.path.relpath(fail_img_path, PROJECT_ROOT),
+            }
+        )
 
-    with open(os.path.join(stage2c_dir, "metrics", "failure_sample_manifest.csv"), "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["canonical_id", "filename", "airnet_psnr", "bicubic_psnr", "psnr_gap", "image_panel_path"])
+    with open(
+        os.path.join(stage2c_dir, "metrics", "failure_sample_manifest.csv"),
+        "w",
+        newline="",
+    ) as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "canonical_id",
+                "filename",
+                "airnet_psnr",
+                "bicubic_psnr",
+                "psnr_gap",
+                "image_panel_path",
+            ],
+        )
         writer.writeheader()
         writer.writerows(fail_manifest_rows)
 
@@ -513,7 +657,7 @@ def main():
         "stage": "Stage 2C",
         "failure_samples_audited": len(failure_samples),
         "worst_psnr_gap_filename": failure_samples[0]["filename"],
-        "worst_psnr_gap_value": round(failure_samples[0]["psnr_diff"], 4)
+        "worst_psnr_gap_value": round(failure_samples[0]["psnr_diff"], 4),
     }
     with open(os.path.join(stage2c_dir, "reports", "stage2c_summary.json"), "w") as f:
         json.dump(s2c_summary, f, indent=4)
@@ -544,7 +688,7 @@ def main():
     s2d_summary = {
         "stage": "Stage 2D",
         "mean_mae_residual_airnet": round(avg_res_airnet, 6),
-        "mean_mae_residual_bicubic": round(avg_res_bicubic, 6)
+        "mean_mae_residual_bicubic": round(avg_res_bicubic, 6),
     }
     with open(os.path.join(stage2d_dir, "reports", "stage2d_summary.json"), "w") as f:
         json.dump(s2d_summary, f, indent=4)
@@ -583,21 +727,31 @@ def main():
             "airnet_laplacian_energy": r_2a["AIR-Net Laplacian Energy"],
             "gt_laplacian_energy": r_2a["GT Laplacian Energy"],
             "detail_loss_classification": r_2b["Detail Loss Classification"],
-            "airnet_mae_residual": r_2d["AIR-Net MAE Residual"]
+            "airnet_mae_residual": r_2d["AIR-Net MAE Residual"],
         }
         master_matrix_rows.append(combined)
 
-    master_matrix_csv = os.path.join(stage2e_dir, "metrics", "cross_stage_sample_audit.csv")
+    master_matrix_csv = os.path.join(
+        stage2e_dir, "metrics", "cross_stage_sample_audit.csv"
+    )
     with open(master_matrix_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(master_matrix_rows[0].keys()))
         writer.writeheader()
         writer.writerows(master_matrix_rows)
 
     # Section 15: 10 Technical Diagnostic Answers
-    avg_psnr_airnet_final = float(np.mean([r["airnet_psnr"] for r in master_matrix_rows]))
-    avg_psnr_bicubic_final = float(np.mean([r["bicubic_psnr"] for r in master_matrix_rows]))
-    avg_ssim_airnet_final = float(np.mean([r["airnet_ssim"] for r in master_matrix_rows]))
-    avg_ssim_bicubic_final = float(np.mean([r["bicubic_ssim"] for r in master_matrix_rows]))
+    avg_psnr_airnet_final = float(
+        np.mean([r["airnet_psnr"] for r in master_matrix_rows])
+    )
+    avg_psnr_bicubic_final = float(
+        np.mean([r["bicubic_psnr"] for r in master_matrix_rows])
+    )
+    avg_ssim_airnet_final = float(
+        np.mean([r["airnet_ssim"] for r in master_matrix_rows])
+    )
+    avg_ssim_bicubic_final = float(
+        np.mean([r["bicubic_ssim"] for r in master_matrix_rows])
+    )
 
     s2e_report_text = (
         "====================================================\n"
@@ -625,7 +779,9 @@ def main():
         "    Over-smoothing pixel intensities in pursuit of structural similarity (SSIM-heavy loss weighting).\n"
         "====================================================\n"
     )
-    with open(os.path.join(stage2e_dir, "reports", "stage2e_cross_stage_report.txt"), "w") as f:
+    with open(
+        os.path.join(stage2e_dir, "reports", "stage2e_cross_stage_report.txt"), "w"
+    ) as f:
         f.write(s2e_report_text)
 
     s2e_summary = {
@@ -635,7 +791,7 @@ def main():
         "airnet_psnr": round(avg_psnr_airnet_final, 4),
         "bicubic_psnr": round(avg_psnr_bicubic_final, 4),
         "airnet_ssim": round(avg_ssim_airnet_final, 4),
-        "bicubic_ssim": round(avg_ssim_bicubic_final, 4)
+        "bicubic_ssim": round(avg_ssim_bicubic_final, 4),
     }
     with open(os.path.join(stage2e_dir, "reports", "stage2e_summary.json"), "w") as f:
         json.dump(s2e_summary, f, indent=4)
@@ -643,16 +799,67 @@ def main():
     # Master Output Index (Section 21)
     index_csv_path = os.path.join(stage2_root, "stage2_output_index.csv")
     index_rows = [
-        {"stage": "Stage 2A", "artifact": "Metrics CSV", "type": "CSV", "path": "stage2a_frequency_audit/metrics/stage2a_320_frequency_metrics.csv", "exists": True, "description": "High-frequency, gradient, and Laplacian energy metrics"},
-        {"stage": "Stage 2B", "artifact": "Metrics CSV", "type": "CSV", "path": "stage2b_detail_audit/metrics/stage2b_320_detail_metrics.csv", "exists": True, "description": "Detail loss classification and PSNR/SSIM win ratios"},
-        {"stage": "Stage 2C", "artifact": "Visualizations", "type": "PNG", "path": "stage2c_failure_visual_audit/visualizations/", "exists": True, "description": "6-panel failure analysis images"},
-        {"stage": "Stage 2D", "artifact": "Metrics CSV", "type": "CSV", "path": "stage2d_degradation_audit/metrics/stage2d_degradation_metrics.csv", "exists": True, "description": "Residual and degradation statistics"},
-        {"stage": "Stage 2E", "artifact": "Master Matrix", "type": "CSV", "path": "stage2e_cross_stage_audit/metrics/cross_stage_sample_audit.csv", "exists": True, "description": "Cross-stage master sample evidence matrix"},
-        {"stage": "Stage 2", "artifact": "Master Report", "type": "TXT", "path": "STAGE2_MASTER_REPORT.txt", "exists": True, "description": "Stage 2 master audit report"},
-        {"stage": "Stage 2", "artifact": "Master Manifest", "type": "JSON", "path": "stage2_manifest.json", "exists": True, "description": "Stage 2 machine-readable manifest"}
+        {
+            "stage": "Stage 2A",
+            "artifact": "Metrics CSV",
+            "type": "CSV",
+            "path": "stage2a_frequency_audit/metrics/stage2a_320_frequency_metrics.csv",
+            "exists": True,
+            "description": "High-frequency, gradient, and Laplacian energy metrics",
+        },
+        {
+            "stage": "Stage 2B",
+            "artifact": "Metrics CSV",
+            "type": "CSV",
+            "path": "stage2b_detail_audit/metrics/stage2b_320_detail_metrics.csv",
+            "exists": True,
+            "description": "Detail loss classification and PSNR/SSIM win ratios",
+        },
+        {
+            "stage": "Stage 2C",
+            "artifact": "Visualizations",
+            "type": "PNG",
+            "path": "stage2c_failure_visual_audit/visualizations/",
+            "exists": True,
+            "description": "6-panel failure analysis images",
+        },
+        {
+            "stage": "Stage 2D",
+            "artifact": "Metrics CSV",
+            "type": "CSV",
+            "path": "stage2d_degradation_audit/metrics/stage2d_degradation_metrics.csv",
+            "exists": True,
+            "description": "Residual and degradation statistics",
+        },
+        {
+            "stage": "Stage 2E",
+            "artifact": "Master Matrix",
+            "type": "CSV",
+            "path": "stage2e_cross_stage_audit/metrics/cross_stage_sample_audit.csv",
+            "exists": True,
+            "description": "Cross-stage master sample evidence matrix",
+        },
+        {
+            "stage": "Stage 2",
+            "artifact": "Master Report",
+            "type": "TXT",
+            "path": "STAGE2_MASTER_REPORT.txt",
+            "exists": True,
+            "description": "Stage 2 master audit report",
+        },
+        {
+            "stage": "Stage 2",
+            "artifact": "Master Manifest",
+            "type": "JSON",
+            "path": "stage2_manifest.json",
+            "exists": True,
+            "description": "Stage 2 machine-readable manifest",
+        },
     ]
     with open(index_csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["stage", "artifact", "type", "path", "exists", "description"])
+        writer = csv.DictWriter(
+            f, fieldnames=["stage", "artifact", "type", "path", "exists", "description"]
+        )
         writer.writeheader()
         writer.writerows(index_rows)
 
@@ -674,7 +881,13 @@ def main():
         "checkpoint": chosen_ckpt if chosen_ckpt else "NONE",
         "checkpoint_sha256": ckpt_sha256,
         "validation_mapping_sha256": mapping_sha256,
-        "completed_stages": ["Stage 2A", "Stage 2B", "Stage 2C", "Stage 2D", "Stage 2E"]
+        "completed_stages": [
+            "Stage 2A",
+            "Stage 2B",
+            "Stage 2C",
+            "Stage 2D",
+            "Stage 2E",
+        ],
     }
     with open(manifest_path, "w") as f:
         json.dump(stage2_manifest, f, indent=4)
@@ -727,9 +940,13 @@ def main():
 
     # 7. Print Final Console Output matching exact Section 24 format
     print("\n")
-    print("==============================================================================")
+    print(
+        "=============================================================================="
+    )
     print("AIR-Net v1 — STAGE 2 COMPLETE")
-    print("==============================================================================")
+    print(
+        "=============================================================================="
+    )
     print("ENVIRONMENT")
     print(f"GPU: {gpu_name}")
     print(f"PyTorch: {pytorch_ver}")
@@ -778,9 +995,14 @@ def main():
     print("[OK] No validation split modification")
     print("[OK] AIR-Net v1 only")
     print("[OK] No AIR-Net v1.2\n")
-    print("==============================================================================")
+    print(
+        "=============================================================================="
+    )
     print("STAGE 2 COMPLETE — READY FOR v1.2 DEVELOPMENT")
-    print("==============================================================================")
+    print(
+        "=============================================================================="
+    )
+
 
 if __name__ == "__main__":
     main()

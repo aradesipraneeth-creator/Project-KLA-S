@@ -7,6 +7,7 @@ from utils.edge_utils import compute_sobel_edges
 
 try:
     from pytorch_msssim import ssim as ssim_fn
+
     HAS_PYTORCH_MSSSIM = True
 except ImportError:
     HAS_PYTORCH_MSSSIM = False
@@ -19,6 +20,7 @@ class HighFrequencyLoss(nn.Module):
         Loss = mean(|HF(pred) - HF(target)|)
     Operates strictly in Float32 to prevent HalfTensor/FloatTensor AMP errors.
     """
+
     def __init__(self, kernel_size: int = 5, sigma: float = 1.0):
         super().__init__()
         self.kernel_size = kernel_size
@@ -26,8 +28,10 @@ class HighFrequencyLoss(nn.Module):
         self.register_buffer("kernel", self._create_gaussian_kernel(kernel_size, sigma))
 
     def _create_gaussian_kernel(self, kernel_size: int, sigma: float) -> torch.Tensor:
-        coords = torch.arange(kernel_size, dtype=torch.float32) - (kernel_size - 1) / 2.0
-        g1d = torch.exp(-coords**2 / (2 * sigma**2))
+        coords = (
+            torch.arange(kernel_size, dtype=torch.float32) - (kernel_size - 1) / 2.0
+        )
+        g1d = torch.exp(-(coords**2) / (2 * sigma**2))
         g1d = g1d / g1d.sum()
         g2d = g1d.unsqueeze(1) @ g1d.unsqueeze(0)
         return g2d.view(1, 1, kernel_size, kernel_size)
@@ -36,13 +40,13 @@ class HighFrequencyLoss(nn.Module):
         p_f = pred.float()
         t_f = target.float()
         kernel = self.kernel.to(device=p_f.device, dtype=torch.float32)
-        
+
         blur_p = F.conv2d(p_f, kernel, padding=self.kernel_size // 2)
         blur_t = F.conv2d(t_f, kernel, padding=self.kernel_size // 2)
-        
+
         hf_p = p_f - blur_p
         hf_t = t_f - blur_t
-        
+
         return F.l1_loss(hf_p, hf_t)
 
 
@@ -51,13 +55,14 @@ class AIRNetV12Loss(nn.Module):
     Controlled AIR-Net v1.2 Loss Function:
         Total Loss = 0.50 * L1 + 0.20 * (1.0 - SSIM) + 0.15 * EdgeLoss + 0.15 * HFLoss
     """
+
     def __init__(
         self,
         l1_weight: float = 0.50,
         ssim_weight: float = 0.20,
         edge_weight: float = 0.15,
         hf_weight: float = 0.15,
-        data_range: float = 1.0
+        data_range: float = 1.0,
     ):
         super().__init__()
         self.l1_weight = l1_weight
@@ -70,9 +75,7 @@ class AIRNetV12Loss(nn.Module):
         self.hf_loss_fn = HighFrequencyLoss(kernel_size=5, sigma=1.0)
 
     def forward(
-        self,
-        pred: Union[torch.Tensor, Dict[str, Any]],
-        target: torch.Tensor
+        self, pred: Union[torch.Tensor, Dict[str, Any]], target: torch.Tensor
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         if isinstance(pred, dict):
             restored_pred = pred["restored"]
@@ -106,16 +109,16 @@ class AIRNetV12Loss(nn.Module):
         loss_hf = self.hf_loss_fn(p_f, t_f)
 
         total_loss = (
-            self.l1_weight * loss_l1 +
-            self.ssim_weight * loss_ssim +
-            self.edge_weight * loss_edge +
-            self.hf_weight * loss_hf
+            self.l1_weight * loss_l1
+            + self.ssim_weight * loss_ssim
+            + self.edge_weight * loss_edge
+            + self.hf_weight * loss_hf
         )
         return total_loss, {
             "l1": loss_l1.item(),
             "ssim_loss": loss_ssim.item(),
             "edge": loss_edge.item(),
-            "hf": loss_hf.item()
+            "hf": loss_hf.item(),
         }
 
 
@@ -124,6 +127,7 @@ class AIRNetHybridLoss(nn.Module):
     Hybrid Loss function for AIR-Net v1:
         Loss = 0.60 * L1 + 0.25 * (1.0 - SSIM) + 0.15 * EdgeLoss
     """
+
     def __init__(
         self,
         l1_weight: float = 0.60,
@@ -131,7 +135,7 @@ class AIRNetHybridLoss(nn.Module):
         edge_weight: float = 0.15,
         lpips_weight: float = 0.0,
         use_lpips: bool = False,
-        data_range: float = 1.0
+        data_range: float = 1.0,
     ):
         super().__init__()
         self.l1_weight = l1_weight
@@ -144,9 +148,7 @@ class AIRNetHybridLoss(nn.Module):
         self.l1_loss = nn.L1Loss()
 
     def forward(
-        self,
-        pred: Union[torch.Tensor, Dict[str, Any]],
-        target: torch.Tensor
+        self, pred: Union[torch.Tensor, Dict[str, Any]], target: torch.Tensor
     ) -> torch.Tensor:
         if isinstance(pred, dict):
             restored_pred = pred["restored"]
@@ -165,7 +167,7 @@ class AIRNetHybridLoss(nn.Module):
         else:
             calc = FallbackSSIM(window_size=11, channel=1, data_range=self.data_range)
             ssim_val = calc(p_f, t_f)
-            
+
         loss_ssim = 1.0 - ssim_val
 
         if edge_pred is not None:
@@ -175,9 +177,9 @@ class AIRNetHybridLoss(nn.Module):
             loss_edge = torch.tensor(0.0, device=target.device)
 
         total_loss = (
-            self.l1_weight * loss_l1 +
-            self.ssim_weight * loss_ssim +
-            self.edge_weight * loss_edge
+            self.l1_weight * loss_l1
+            + self.ssim_weight * loss_ssim
+            + self.edge_weight * loss_edge
         )
         return total_loss
 
@@ -187,7 +189,10 @@ class FallbackSSIM(nn.Module):
     Fallback SSIM module when pytorch-msssim is unavailable.
     Includes AMP dtype & device matching to prevent HalfTensor/FloatTensor mismatch errors.
     """
-    def __init__(self, window_size: int = 11, channel: int = 1, data_range: float = 1.0):
+
+    def __init__(
+        self, window_size: int = 11, channel: int = 1, data_range: float = 1.0
+    ):
         super().__init__()
         self.window_size = window_size
         self.channel = channel
@@ -195,7 +200,14 @@ class FallbackSSIM(nn.Module):
         self.register_buffer("window", self.create_window(window_size, channel))
 
     def gaussian(self, window_size: int, sigma: float):
-        gauss = torch.exp(torch.tensor([-(x - window_size // 2) ** 2 / float(2 * sigma ** 2) for x in range(window_size)]))
+        gauss = torch.exp(
+            torch.tensor(
+                [
+                    -((x - window_size // 2) ** 2) / float(2 * sigma**2)
+                    for x in range(window_size)
+                ]
+            )
+        )
         return gauss / gauss.sum()
 
     def create_window(self, window_size: int, channel: int):
@@ -212,19 +224,52 @@ class FallbackSSIM(nn.Module):
 
         window = self.window.to(device=img1_f.device, dtype=torch.float32)
 
-        mu1 = F.conv2d(img1_f, window, padding=self.window_size // 2, groups=self.channel)
-        mu2 = F.conv2d(img2_f, window, padding=self.window_size // 2, groups=self.channel)
+        mu1 = F.conv2d(
+            img1_f, window, padding=self.window_size // 2, groups=self.channel
+        )
+        mu2 = F.conv2d(
+            img2_f, window, padding=self.window_size // 2, groups=self.channel
+        )
 
         mu1_sq = mu1.pow(2)
         mu2_sq = mu2.pow(2)
         mu1_mu2 = mu1 * mu2
 
-        sigma1_sq = F.conv2d(img1_f * img1_f, window, padding=self.window_size // 2, groups=self.channel) - mu1_sq
-        sigma2_sq = F.conv2d(img2_f * img2_f, window, padding=self.window_size // 2, groups=self.channel) - mu2_sq
-        sigma12 = F.conv2d(img1_f * img2_f, window, padding=self.window_size // 2, groups=self.channel) - mu1_mu2
+        sigma1_sq = (
+            F.conv2d(
+                img1_f * img1_f,
+                window,
+                padding=self.window_size // 2,
+                groups=self.channel,
+            )
+            - mu1_sq
+        )
+        sigma2_sq = (
+            F.conv2d(
+                img2_f * img2_f,
+                window,
+                padding=self.window_size // 2,
+                groups=self.channel,
+            )
+            - mu2_sq
+        )
+        sigma12 = (
+            F.conv2d(
+                img1_f * img2_f,
+                window,
+                padding=self.window_size // 2,
+                groups=self.channel,
+            )
+            - mu1_mu2
+        )
 
-        ssim_map = ((2 * mu1_mu2 + c1) * (2 * sigma12 + c2)) / ((mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2))
-        return ssim_map.mean()
+        ssim_map = ((2 * mu1_mu2 + c1) * (2 * sigma12 + c2)) / (
+            (mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2)
+        )
+        out = ssim_map.mean()
+        if img1.dtype == torch.float16:
+            out = out.half()
+        return out
 
 
 HybridLoss = AIRNetHybridLoss

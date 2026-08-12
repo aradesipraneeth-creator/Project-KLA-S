@@ -13,7 +13,7 @@ for f in files:
     img = np.load(os.path.join(lr_folder, f))
 
     total_sum += img.sum()
-    total_sq_sum += (img ** 2).sum()
+    total_sq_sum += (img**2).sum()
     total_pixels += img.size
 
 mean = total_sum / total_pixels

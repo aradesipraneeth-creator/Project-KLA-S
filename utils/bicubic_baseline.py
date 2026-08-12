@@ -1,13 +1,14 @@
+from utils.metrics import calculate_psnr, calculate_ssim
+from datasets.kla_dataset import get_train_val_datasets
+from configs.config import Config
+from typing import Tuple
+import torch.nn.functional as F
+import torch
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import torch
-import torch.nn.functional as F
-from typing import Tuple
-from configs.config import Config
-from datasets.kla_dataset import get_train_val_datasets
-from utils.metrics import calculate_psnr, calculate_ssim
 
 def compute_bicubic_baseline(config: Config) -> Tuple[float, float]:
     """
@@ -22,7 +23,7 @@ def compute_bicubic_baseline(config: Config) -> Tuple[float, float]:
         train_gt_dir=config.train_gt_dir,
         seed=config.seed,
         train_split=config.train_split,
-        val_split=config.val_split
+        val_split=config.val_split,
     )
 
     psnr_list = []
@@ -34,7 +35,9 @@ def compute_bicubic_baseline(config: Config) -> Tuple[float, float]:
         gt_batch = gt_tensor.unsqueeze(0)  # (1, 1, 256, 256)
 
         # Bicubic 2x upsampling from 128x128 to 256x256
-        bicubic_pred = F.interpolate(lr_batch, size=(256, 256), mode='bicubic', align_corners=False)
+        bicubic_pred = F.interpolate(
+            lr_batch, size=(256, 256), mode="bicubic", align_corners=False
+        )
 
         # Clip bicubic output to [0, 1] range for metric calculation against GT
         bicubic_pred_clamped = torch.clamp(bicubic_pred, 0.0, 1.0)
@@ -64,6 +67,7 @@ def compute_bicubic_baseline(config: Config) -> Tuple[float, float]:
     print(f"Bicubic baseline computed: PSNR={avg_psnr:.4f} dB, SSIM={avg_ssim:.4f}")
     print(f"Saved report to {config.bicubic_baseline_file}")
     return avg_psnr, avg_ssim
+
 
 if __name__ == "__main__":
     cfg = Config()

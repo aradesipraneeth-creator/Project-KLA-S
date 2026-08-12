@@ -3,15 +3,16 @@ import csv
 import sys
 
 # Ensure UTF-8 output formatting for Windows console
-if hasattr(sys.stdout, 'reconfigure'):
+if hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
 from utils.logger import CSVLogger
 
-def main():
+
+def test_main():
     print("====================================================")
     print("AIR-NET V1 - CSVLOGGER UPGRADE VERIFICATION")
     print("====================================================")
@@ -36,7 +37,7 @@ def main():
         gpu_reserved_mb=2048.0,
         gpu_peak_mb=1500.0,
         images_per_second=142.5,
-        batches_per_second=35.6
+        batches_per_second=35.6,
     )
     print("[OK] Log epoch with new columns (gpu_peak_mb, throughput) passed.")
 
@@ -50,7 +51,7 @@ def main():
         lr=0.00015,
         gpu_allocated_mb=1210.0,
         gpu_reserved_mb=2048.0,
-        gpu_max_allocated_mb=1600.0  # Legacy parameter
+        gpu_max_allocated_mb=1600.0,  # Legacy parameter
     )
     print("[OK] Backward compatibility test with gpu_max_allocated_mb passed.")
 
@@ -66,7 +67,7 @@ def main():
         gpu_reserved_mb=2048.0,
         gpu_peak_mb=1650.0,
         unknown_metric_1=999.9,
-        unknown_metric_2="dummy_val"
+        unknown_metric_2="dummy_val",
     )
     print("[OK] Resilience test with unknown **kwargs passed without exceptions.")
 
@@ -78,23 +79,38 @@ def main():
         row2 = reader[2]
 
     expected_header = [
-        "epoch", "train_loss", "val_loss", "psnr", "ssim", "learning_rate",
-        "gpu_allocated_mb", "gpu_reserved_mb", "gpu_peak_mb",
-        "images_per_second", "batches_per_second"
+        "epoch",
+        "train_loss",
+        "val_loss",
+        "psnr",
+        "ssim",
+        "learning_rate",
+        "gpu_allocated_mb",
+        "gpu_reserved_mb",
+        "gpu_peak_mb",
+        "images_per_second",
+        "batches_per_second",
     ]
-    assert header == expected_header, f"Header mismatch!\nExpected: {expected_header}\nGot: {header}"
+    assert (
+        header == expected_header
+    ), f"Header mismatch!\nExpected: {expected_header}\nGot: {header}"
 
     # Row 2 check (legacy gpu_max_allocated_mb mapped to gpu_peak_mb)
     peak_idx = header.index("gpu_peak_mb")
-    assert float(row2[peak_idx]) == 1600.0, f"Expected 1600.0 for mapped peak memory, got {row2[peak_idx]}"
+    assert (
+        float(row2[peak_idx]) == 1600.0
+    ), f"Expected 1600.0 for mapped peak memory, got {row2[peak_idx]}"
 
     print("----------------------------------------------------")
     print("✓ CSVLogger updated successfully.")
-    print("✓ New columns (gpu_peak_mb, images_per_second, batches_per_second) verified.")
+    print(
+        "✓ New columns (gpu_peak_mb, images_per_second, batches_per_second) verified."
+    )
     print("✓ Legacy gpu_max_allocated_mb mapped correctly.")
     print("✓ Unknown **kwargs handled gracefully.")
     print("✓ Complete backward compatibility maintained.")
     print("====================================================")
 
+
 if __name__ == "__main__":
-    main()
+    test_main()

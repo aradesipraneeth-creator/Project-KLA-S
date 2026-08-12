@@ -20,11 +20,12 @@ st.set_page_config(
     page_title="KLA Semiconductor AIR-Net v1.2 Viewer",
     page_icon="🔬",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # Custom Styling
-st.markdown("""
+st.markdown(
+    """
     <style>
     .main {
         background-color: #0E1117;
@@ -47,7 +48,9 @@ st.markdown("""
         font-weight: 700;
     }
     </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # --- Cached AIR-Net PyTorch Model Loader ---
@@ -57,8 +60,9 @@ def load_airnet_model():
     Instantiates AIRNet model using project Config and loads checkpoint if available.
     """
     from utils.device import get_device
+
     device = get_device()
-    
+
     model = AIRNet(
         in_channels=config.in_channels,
         out_channels=config.out_channels,
@@ -68,32 +72,46 @@ def load_airnet_model():
         enc_blocks=config.enc_blocks,
         latent_blocks=config.latent_blocks,
         dec_blocks=config.dec_blocks,
-        ffn_expansion_factor=config.ffn_expansion_factor
+        ffn_expansion_factor=config.ffn_expansion_factor,
     ).to(device)
 
     checkpoint_dir = config.checkpoint_dir
     checkpoints_to_check = [
-        ("airnet_v1_2_ema_best_model.pth", os.path.join(checkpoint_dir, "airnet_v1_2_ema_best_model.pth")),
-        ("airnet_v1_2_best_model.pth", os.path.join(checkpoint_dir, "airnet_v1_2_best_model.pth")),
-        ("airnet_v1_1_ema_best_model.pth", os.path.join("outputs", "v1_1", "checkpoints", "airnet_v1_1_ema_best_model.pth")),
-        ("airnet_ema_best_model.pth", os.path.join("outputs", "checkpoints", "airnet_ema_best_model.pth")),
+        (
+            "airnet_v1_2_ema_best_model.pth",
+            os.path.join(checkpoint_dir, "airnet_v1_2_ema_best_model.pth"),
+        ),
+        (
+            "airnet_v1_2_best_model.pth",
+            os.path.join(checkpoint_dir, "airnet_v1_2_best_model.pth"),
+        ),
+        (
+            "airnet_v1_1_ema_best_model.pth",
+            os.path.join(
+                "outputs", "v1_1", "checkpoints", "airnet_v1_1_ema_best_model.pth"
+            ),
+        ),
+        (
+            "airnet_ema_best_model.pth",
+            os.path.join("outputs", "checkpoints", "airnet_ema_best_model.pth"),
+        ),
         ("ema_best_model.pth", os.path.join(checkpoint_dir, "ema_best_model.pth")),
         ("best_model.pth", os.path.join(checkpoint_dir, "best_model.pth")),
-        ("last_model.pth", os.path.join(checkpoint_dir, "last_model.pth"))
+        ("last_model.pth", os.path.join(checkpoint_dir, "last_model.pth")),
     ]
 
-    loaded_checkpoint_name = None
+    loaded_ckpt_name = None
     for name, path in checkpoints_to_check:
         if os.path.exists(path):
             try:
                 state_dict = torch.load(path, map_location=device)
-                if 'ema_state_dict' in state_dict:
-                    state_dict = state_dict['ema_state_dict']
-                elif 'model_state_dict' in state_dict:
-                    state_dict = state_dict['model_state_dict']
-                
+                if "ema_state_dict" in state_dict:
+                    state_dict = state_dict["ema_state_dict"]
+                elif "model_state_dict" in state_dict:
+                    state_dict = state_dict["model_state_dict"]
+
                 model.load_state_dict(state_dict, strict=False)
-                loaded_checkpoint_name = name
+                loaded_ckpt_name = name
                 break
             except Exception as e:
                 print(f"Notice loading checkpoint {path}: {e}")
@@ -105,11 +123,13 @@ def load_airnet_model():
     print("STREAMLIT DASHBOARD STARTUP VERIFICATION:")
     print(f"  [OK] AIR-Net configuration loaded ({config.MODEL_VERSION})")
     print(f"  [OK] AIR-Net model instantiated ({num_params:,} parameters)")
-    print(f"  [OK] Checkpoint loaded ({loaded_checkpoint_name or 'Initialized Weights'})")
+    print(
+        f"  [OK] Checkpoint loaded ({loaded_ckpt_name or 'Initialized Weights'})"
+    )
     print("  [OK] Dashboard ready")
     print("====================================================")
 
-    return model, device, loaded_checkpoint_name
+    return model, device, loaded_ckpt_name
 
 
 def run_airnet_inference(model, device, lr_arr: np.ndarray):
@@ -127,8 +147,20 @@ def run_airnet_inference(model, device, lr_arr: np.ndarray):
     with torch.no_grad():
         out_dict = model(lr_tensor)
 
-    restored_arr = torch.clamp(out_dict["restored"], 0.0, 1.0).squeeze().cpu().numpy().astype(np.float32)
-    edge_arr = torch.clamp(out_dict["edge"], 0.0, 1.0).squeeze().cpu().numpy().astype(np.float32)
+    restored_arr = (
+        torch.clamp(out_dict["restored"], 0.0, 1.0)
+        .squeeze()
+        .cpu()
+        .numpy()
+        .astype(np.float32)
+    )
+    edge_arr = (
+        torch.clamp(out_dict["edge"], 0.0, 1.0)
+        .squeeze()
+        .cpu()
+        .numpy()
+        .astype(np.float32)
+    )
     noise_score = float(out_dict["noise"].item())
     blur_score = float(out_dict["blur"].item())
     texture_score = float(out_dict["texture"].item())
@@ -138,7 +170,7 @@ def run_airnet_inference(model, device, lr_arr: np.ndarray):
         "edge": edge_arr,
         "noise": noise_score,
         "blur": blur_score,
-        "texture": texture_score
+        "texture": texture_score,
     }
 
 
@@ -146,17 +178,21 @@ def run_airnet_inference(model, device, lr_arr: np.ndarray):
 def compute_mse(pred: np.ndarray, gt: np.ndarray) -> float:
     return float(np.mean((pred - gt) ** 2))
 
+
 def compute_mae(pred: np.ndarray, gt: np.ndarray) -> float:
     return float(np.mean(np.abs(pred - gt)))
 
+
 def compute_rmse(pred: np.ndarray, gt: np.ndarray) -> float:
     return float(np.sqrt(compute_mse(pred, gt)))
+
 
 def compute_psnr(pred: np.ndarray, gt: np.ndarray, data_range: float = 1.0) -> float:
     mse = compute_mse(pred, gt)
     if mse == 0:
         return 100.0
-    return float(10.0 * np.log10((data_range ** 2) / mse))
+    return float(10.0 * np.log10((data_range**2) / mse))
+
 
 def compute_ssim(pred: np.ndarray, gt: np.ndarray, data_range: float = 1.0) -> float:
     C1 = (0.01 * data_range) ** 2
@@ -164,30 +200,40 @@ def compute_ssim(pred: np.ndarray, gt: np.ndarray, data_range: float = 1.0) -> f
     img1, img2 = pred.astype(np.float64), gt.astype(np.float64)
     mu1 = gaussian_filter(img1, sigma=1.5)
     mu2 = gaussian_filter(img2, sigma=1.5)
-    mu1_sq, mu2_sq, mu1_mu2 = mu1 ** 2, mu2 ** 2, mu1 * mu2
-    sigma1_sq = gaussian_filter(img1 ** 2, sigma=1.5) - mu1_sq
-    sigma2_sq = gaussian_filter(img2 ** 2, sigma=1.5) - mu2_sq
+    mu1_sq, mu2_sq, mu1_mu2 = mu1**2, mu2**2, mu1 * mu2
+    sigma1_sq = gaussian_filter(img1**2, sigma=1.5) - mu1_sq
+    sigma2_sq = gaussian_filter(img2**2, sigma=1.5) - mu2_sq
     sigma12 = gaussian_filter(img1 * img2, sigma=1.5) - mu1_mu2
-    ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
+    ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / (
+        (mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2)
+    )
     return float(np.mean(ssim_map))
 
+
 def resize_bicubic(lr_img: np.ndarray, target_shape=(256, 256)) -> np.ndarray:
-    zoom_factors = (target_shape[0] / lr_img.shape[0], target_shape[1] / lr_img.shape[1])
+    zoom_factors = (
+        target_shape[0] / lr_img.shape[0],
+        target_shape[1] / lr_img.shape[1],
+    )
     bicubic = zoom(lr_img, zoom_factors, order=3)
     return np.clip(bicubic, 0.0, 1.0)
 
 
 # --- Application Header ---
 st.title("🔬 KLA Semiconductor AIR-Net Viewer")
-st.caption(f"Adaptive Image Restoration Network ({config.MODEL_VERSION}) Evaluation & Degradation Diagnostics")
+st.caption(
+    f"Adaptive Image Restoration Network ({config.MODEL_VERSION}) Evaluation & Degradation Diagnostics"
+)
 
 # --- Load AIR-Net Model ---
 try:
     airnet_model, exec_device, loaded_ckpt_name = load_airnet_model()
     if loaded_ckpt_name:
-        ckpt_status_msg = f"✅ Loaded checkpoint: `{loaded_checkpoint_name}` ({exec_device.type.upper()})"
+        ckpt_status_msg = f"✅ Loaded checkpoint: `{loaded_ckpt_name}` ({exec_device.type.upper()})"
     else:
-        ckpt_status_msg = f"⚠️ No trained checkpoint found. Using initialized AIR-Net weights."
+        ckpt_status_msg = (
+            f"⚠️ No trained checkpoint found. Using initialized AIR-Net weights."
+        )
 except Exception as e:
     st.error(f"Error initializing AIR-Net PyTorch model:")
     st.exception(e)
@@ -198,7 +244,14 @@ except Exception as e:
 st.sidebar.header("📁 Data Source Selection")
 st.sidebar.markdown(ckpt_status_msg)
 
-source_mode = st.sidebar.radio("Select Input Source:", ["Training/Test Dataset Browser", "Validation Predictions Browser", "Manual File Upload"])
+source_mode = st.sidebar.radio(
+    "Select Input Source:",
+    [
+        "Training/Test Dataset Browser",
+        "Validation Predictions Browser",
+        "Manual File Upload",
+    ],
+)
 
 lr_array, gt_array, pred_array, edge_array = None, None, None, None
 noise_val, blur_val, texture_val = 0.0, 0.0, 0.0
@@ -210,13 +263,17 @@ train_gt_dir = config.train_gt_dir
 test_lr_dir = config.test_lr_dir
 
 if source_mode == "Training/Test Dataset Browser":
-    browser_folder = st.sidebar.selectbox("Select Dataset Folder:", ["Train/train (NoisyLR + GT)", "Test_NoisyLR"])
+    browser_folder = st.sidebar.selectbox(
+        "Select Dataset Folder:", ["Train/train (NoisyLR + GT)", "Test_NoisyLR"]
+    )
     if browser_folder == "Train/train (NoisyLR + GT)" and os.path.exists(train_lr_dir):
         lr_files = sorted([f for f in os.listdir(train_lr_dir) if f.endswith(".npy")])
         if lr_files:
             selected_file = st.sidebar.selectbox("Select Sample File:", lr_files)
             selected_sample_name = selected_file
-            lr_array = np.load(os.path.join(train_lr_dir, selected_file)).astype(np.float32)
+            lr_array = np.load(os.path.join(train_lr_dir, selected_file)).astype(
+                np.float32
+            )
             if os.path.exists(train_gt_dir):
                 gt_path = os.path.join(train_gt_dir, selected_file)
                 if os.path.exists(gt_path):
@@ -226,18 +283,27 @@ if source_mode == "Training/Test Dataset Browser":
         if test_files:
             selected_file = st.sidebar.selectbox("Select Test Sample:", test_files)
             selected_sample_name = selected_file
-            lr_array = np.load(os.path.join(test_lr_dir, selected_file)).astype(np.float32)
+            lr_array = np.load(os.path.join(test_lr_dir, selected_file)).astype(
+                np.float32
+            )
 
 elif source_mode == "Validation Predictions Browser":
     val_preds_dir = os.path.join(outputs_dir, "validation_predictions")
     if os.path.exists(val_preds_dir):
         npy_files = sorted([f for f in os.listdir(val_preds_dir) if f.endswith(".npy")])
         if npy_files:
-            selected_pred_file = st.sidebar.selectbox("Select Validation Prediction:", npy_files)
+            selected_pred_file = st.sidebar.selectbox(
+                "Select Validation Prediction:", npy_files
+            )
             selected_sample_name = selected_pred_file
             try:
                 from datasets.kla_dataset import get_train_val_datasets
-                _, val_ds = get_train_val_datasets(train_lr_dir=config.train_lr_dir, train_gt_dir=config.train_gt_dir, seed=config.seed)
+
+                _, val_ds = get_train_val_datasets(
+                    train_lr_dir=config.train_lr_dir,
+                    train_gt_dir=config.train_gt_dir,
+                    seed=config.seed,
+                )
                 parts = selected_pred_file.split("_")
                 sample_idx_num = int(parts[1]) - 1
                 if 0 <= sample_idx_num < len(val_ds):
@@ -290,7 +356,11 @@ if lr_array is None:
         airnet_out = run_airnet_inference(airnet_model, exec_device, lr_array)
         pred_array = airnet_out["restored"]
         edge_array = airnet_out["edge"]
-        noise_val, blur_val, texture_val = airnet_out["noise"], airnet_out["blur"], airnet_out["texture"]
+        noise_val, blur_val, texture_val = (
+            airnet_out["noise"],
+            airnet_out["blur"],
+            airnet_out["texture"],
+        )
     bicubic_array = resize_bicubic(lr_array, (256, 256))
     selected_sample_name = "Demo Preview Sample"
 
@@ -340,11 +410,13 @@ with col3:
 
 
 # --- TABS FOR EXPANDED ANALYSIS ---
-tab1, tab2, tab3 = st.tabs([
-    "🔍 Detailed Comparison & Error Heatmaps",
-    "📊 Quantitative Metrics & Statistics",
-    "📄 AIR-Net Reports & Metadata"
-])
+tab1, tab2, tab3 = st.tabs(
+    [
+        "🔍 Detailed Comparison & Error Heatmaps",
+        "📊 Quantitative Metrics & Statistics",
+        "📄 AIR-Net Reports & Metadata",
+    ]
+)
 
 with tab1:
     if pred_array is not None and gt_array is not None:
@@ -357,7 +429,13 @@ with tab1:
             st.pyplot(fig)
         with c2:
             st.markdown("**GT Sobel Edge Map**")
-            gt_edge_sobel = compute_sobel_edges(torch.from_numpy(gt_array).unsqueeze(0).unsqueeze(0)).squeeze().numpy()
+            gt_edge_sobel = (
+                compute_sobel_edges(
+                    torch.from_numpy(gt_array).unsqueeze(0).unsqueeze(0)
+                )
+                .squeeze()
+                .numpy()
+            )
             fig, ax = plt.subplots()
             ax.imshow(gt_edge_sobel, cmap="magma", vmin=0, vmax=1)
             ax.axis("off")
