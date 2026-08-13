@@ -1,14 +1,19 @@
-# KLA Project S — Semiconductor Image Restoration (AIR-Net v2)
+# KLA Project S — Semiconductor Image Restoration (AIR-Net v3)
 
-Adaptive Image Restoration Network (AIR-Net v2) for high-fidelity $128 \times 128 \to 256 \times 256$ semiconductor inspection image super-resolution.
+Adaptive Image Restoration Network (AIR-Net v3) — Content-Adaptive Multi-Expert Semiconductor Image Restoration System for high-fidelity $128 \times 128 \to 256 \times 256$ super-resolution.
 
-## 🚀 Key Features
+## 🚀 Key Features (AIR-Net v3)
 
-- **Residual Reconstruction Branch**: Learns $\text{Restored} = \text{Bicubic}(\text{Input}) + \text{Residual}(\text{Input})$, ensuring an immediate baseline of $\text{PSNR} \ge 22.98\text{ dB}$ on Epoch 1 while targeting $\text{PSNR} \ge 25\text{ dB}$.
-- **Multi-Objective Loss Formulation**:
-  $$\text{Total Loss} = 0.70 \cdot L_1 + 0.20 \cdot \text{SSIM} + 0.05 \cdot \text{Edge} + 0.05 \cdot \text{HighFrequency}$$
-- **Float32 Analytical Precision**: Safe mixed precision training with `torch.amp.autocast("cuda")` and `torch.amp.GradScaler("cuda")`.
-- **Authoritative Validation Basis**: Evaluated on 320 canonical validation samples locked via SHA-256 (`d3c8c112fb...`).
+- **Image Characteristic Indexer** ([`models/image_indexer.py`](models/image_indexer.py)): Computes 10 normalized metrics strictly from the $128 \times 128$ INPUT image (Sobel edge index, gradient energy, Laplacian energy, high-frequency energy, texture index, noise index, contrast index, entropy, edge density, sparse feature index).
+- **Soft Adaptive Router** ([`models/adaptive_router.py`](models/adaptive_router.py)): Maps normalized input characteristics to 5 soft restoration category probabilities:
+  - `EDGE_DOMINANT`
+  - `TEXTURE_DOMINANT`
+  - `NOISE_DOMINANT`
+  - `SMOOTH_LOW_CONTRAST`
+  - `SPARSE_FEATURE`
+- **Lightweight Specialized Experts & Soft MoE Fusion** ([`models/experts/`](models/experts)): Shared Restormer backbone + 5 parallel expert branches fused via $F = \sum r_i \cdot \text{Expert}_i$.
+- **Sample-Adaptive Dynamic Loss** ([`losses/adaptive_loss.py`](losses/adaptive_loss.py)): Loss weights dynamically scale based on category routing.
+- **Float32 Precision & Locked Validation**: Modern PyTorch AMP (`torch.amp.autocast("cuda")` & `torch.amp.GradScaler("cuda")`) with canonical 320-sample validation split locked via SHA-256 (`d3c8c112fb...`).
 
 ---
 
@@ -24,30 +29,30 @@ pip install -r requirements.txt
 
 ## 🏋️ Training
 
-To train AIR-Net v2 locally or on remote GPU hardware (NVIDIA T4 / DGX B200):
+To execute AIR-Net v3 content-adaptive training locally or on remote GPU hardware (NVIDIA T4 / DGX B200):
 
 ```bash
-python scripts/execute_v2_pipeline.py
+python scripts/execute_v3_pipeline.py
 ```
 
 ### Google Colab Remote GPU Execution:
-Open [`AIRNet_v2_Colab_T4_Training.ipynb`](AIRNet_v2_Colab_T4_Training.ipynb) directly in Google Colab with T4 GPU runtime enabled.
+Open [`AIRNet_v3_Colab_T4_Training.ipynb`](AIRNet_v3_Colab_T4_Training.ipynb) directly in Google Colab with T4 GPU runtime enabled.
 
 ---
 
-## 🔬 Standalone Inference
+## 🔬 Standalone Inference (No GT Required!)
 
-Run restoration on any $128 \times 128$ grayscale semiconductor image:
+Run content-adaptive restoration on any $128 \times 128$ grayscale semiconductor image:
 
 ```bash
-python inference/restore_v2.py path/to/128x128_image.npy output_256.png
+python inference/restore_v3.py path/to/128x128_image.npy output_v3_256.png
 ```
 
 ---
 
 ## 🖥️ Streamlit Web Application
 
-Launch the interactive multi-model comparison dashboard:
+Launch the interactive multi-model and content-adaptive dashboard:
 
 ```bash
 streamlit run app.py
@@ -55,6 +60,7 @@ streamlit run app.py
 
 Features:
 - Single $128 \times 128$ image upload (.npy, .png, .jpg).
-- Live 6-panel grid comparing NoisyLR, Bicubic, AIR-Net v1, AIR-Net v1.2, AIR-Net v2, and Ground Truth.
-- Live quantitative metric evaluation (PSNR, SSIM, LPIPS).
+- Displays identified Category, Soft Routing Probabilities bar chart, and 10 Characteristic Features.
+- Multi-model comparative grid view (NoisyLR, Bicubic, AIR-Net v1, v1.2, v2, v3, Ground Truth).
+- Live metric evaluation (PSNR, SSIM, LPIPS).
 - 1-click download of $256 \times 256$ restored image.
