@@ -43,34 +43,21 @@ def get_file_sha256(filepath: str) -> str:
             hasher.update(chunk)
     return hasher.hexdigest()
 
-# Instantiate LPIPS model ONCE globally to prevent re-initialization overhead
-_GLOBAL_LPIPS_FN = None
-def get_global_lpips_fn(device):
-    global _GLOBAL_LPIPS_FN
-    if _GLOBAL_LPIPS_FN is None:
-        try:
-            import lpips
-            _GLOBAL_LPIPS_FN = lpips.LPIPS(net='alex', verbose=False).to(device)
-        except Exception:
-            _GLOBAL_LPIPS_FN = "FAILED"
-    return _GLOBAL_LPIPS_FN
-
-def compute_lpips_fast(pred_tensor: torch.Tensor, gt_tensor: torch.Tensor, device) -> float:
+def compute_lpips_safe(pred_tensor: torch.Tensor, gt_tensor: torch.Tensor) -> float:
     p_float = pred_tensor.float().clamp(0.0, 1.0)
     g_float = gt_tensor.float().clamp(0.0, 1.0)
-    lpips_fn = get_global_lpips_fn(device)
-    if lpips_fn != "FAILED" and lpips_fn is not None:
-        try:
-            p3 = p_float.repeat(1, 3, 1, 1) * 2.0 - 1.0
-            g3 = g_float.repeat(1, 3, 1, 1) * 2.0 - 1.0
-            with torch.no_grad():
-                dist = lpips_fn(p3, g3).mean().item()
-            return float(dist)
-        except Exception:
-            pass
-    with torch.no_grad():
-        dist = F.l1_loss(p_float, g_float).item()
-    return float(dist)
+    try:
+        import lpips
+        loss_fn = lpips.LPIPS(net='alex', verbose=False).to(p_float.device)
+        p3 = p_float.repeat(1, 3, 1, 1) * 2.0 - 1.0
+        g3 = g_float.repeat(1, 3, 1, 1) * 2.0 - 1.0
+        with torch.no_grad():
+            dist = loss_fn(p3, g3).mean().item()
+        return dist
+    except Exception:
+        with torch.no_grad():
+            dist = F.l1_loss(p_float, g_float).item()
+        return dist
 
 def compute_gaussian_blur(img_tensor: torch.Tensor, kernel_size: int = 5, sigma: float = 1.0) -> torch.Tensor:
     img_f = img_tensor.float()
@@ -196,7 +183,7 @@ def main():
     for d in [v3_root, ckpt_dir, vis_dir, comp_dir, metrics_dir, indexes_dir, final_demo_dir]:
         os.makedirs(d, exist_ok=True)
 
-    # 2. Authoritative Validation Mapping Lock
+    # 2. Authoritative Validation Mapping Lock (Section 37)
     mapping_csv = os.path.join(PROJECT_ROOT, "outputs", "stage1", "stage1_reconstruction", "authoritative_validation_mapping.csv")
     if not os.path.exists(mapping_csv):
         raise FileNotFoundError(f"Authoritative validation mapping CSV missing at '{mapping_csv}'")
@@ -223,50 +210,42 @@ def main():
     train_filenames = sorted([f for f in common_files if f not in val_set_filenames])
     assert len(train_filenames) == 2880, f"Expected 2880 train files, got {len(train_filenames)}"
 
-    # 3. Training Set Index Analysis & Normalization Fitting
-    train_csv_path = os.path.join(indexes_dir, "train_image_characteristics.csv")
-    norm_params_path = os.path.join(indexes_dir, "index_normalization.json")
+    # 3. Training Set Index Analysis & Normalization Fitting (Section 15 & 39)
+    print("--- Scanning 2,880 Training Images & Calculating 10 Characteristic Indices ---")
     raw_indexer = ImageIndexer()
+    train_raw_list = []
+    train_csv_path = os.path.join(indexes_dir, "train_image_characteristics.csv")
 
-    if os.path.exists(train_csv_path) and os.path.exists(norm_params_path):
-        print(f"[OK] Reusing precomputed training indices: '{train_csv_path}'")
-        with open(norm_params_path, "r") as f:
-            norm_params = json.load(f)
-    else:
-        print("--- Scanning 2,880 Training Images & Calculating 10 Characteristic Indices ---")
-        train_raw_list = []
-        with open(train_csv_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                "filename", "sobel_edge_index", "gradient_energy", "laplacian_energy",
-                "hf_energy", "texture_index", "noise_index", "contrast_index",
-                "entropy", "edge_density", "sparse_feature_index"
-            ])
-            for idx, fname in enumerate(train_filenames):
-                arr = np.load(os.path.join(config.train_lr_dir, fname)).astype(np.float32)
-                indices = raw_indexer.compute_indices(arr)
-                train_raw_list.append(indices)
-                writer.writerow([fname] + [indices[k] for k in indices.keys()])
+    with open(train_csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "filename", "sobel_edge_index", "gradient_energy", "laplacian_energy",
+            "hf_energy", "texture_index", "noise_index", "contrast_index",
+            "entropy", "edge_density", "sparse_feature_index"
+        ])
+        for idx, fname in enumerate(train_filenames):
+            arr = np.load(os.path.join(config.train_lr_dir, fname)).astype(np.float32)
+            indices = raw_indexer.compute_indices(arr)
+            train_raw_list.append(indices)
+            writer.writerow([fname] + [indices[k] for k in indices.keys()])
 
-        norm_params = fit_training_normalization(train_raw_list, save_json_path=norm_params_path)
+    norm_params_path = os.path.join(indexes_dir, "index_normalization.json")
+    norm_params = fit_training_normalization(train_raw_list, save_json_path=norm_params_path)
 
-    # 4. Validation Set Index Analysis
+    # 4. Validation Set Index Analysis (Section 40)
+    print("--- Scanning 320 Validation Images & Recording Indices ---")
     val_csv_path = os.path.join(indexes_dir, "validation_image_characteristics.csv")
-    if os.path.exists(val_csv_path):
-        print(f"[OK] Reusing precomputed validation indices: '{val_csv_path}'")
-    else:
-        print("--- Scanning 320 Validation Images & Recording Indices ---")
-        with open(val_csv_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                "filename", "sobel_edge_index", "gradient_energy", "laplacian_energy",
-                "hf_energy", "texture_index", "noise_index", "contrast_index",
-                "entropy", "edge_density", "sparse_feature_index"
-            ])
-            for fname in val_filenames:
-                arr = np.load(os.path.join(config.train_lr_dir, fname)).astype(np.float32)
-                indices = raw_indexer.compute_indices(arr)
-                writer.writerow([fname] + [indices[k] for k in indices.keys()])
+    with open(val_csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "filename", "sobel_edge_index", "gradient_energy", "laplacian_energy",
+            "hf_energy", "texture_index", "noise_index", "contrast_index",
+            "entropy", "edge_density", "sparse_feature_index"
+        ])
+        for fname in val_filenames:
+            arr = np.load(os.path.join(config.train_lr_dir, fname)).astype(np.float32)
+            indices = raw_indexer.compute_indices(arr)
+            writer.writerow([fname] + [indices[k] for k in indices.keys()])
 
     # Loaders
     train_ds = KLAPairedNpyDataset(train_filenames, config.train_lr_dir, config.train_gt_dir)
@@ -275,7 +254,7 @@ def main():
     train_loader = DataLoader(train_ds, batch_size=config.batch_size, shuffle=True, num_workers=0, pin_memory=is_cuda())
     val_loader = DataLoader(val_ds, batch_size=config.batch_size, shuffle=False, num_workers=0, pin_memory=is_cuda())
 
-    # 5. Model Architecture & Loss Setup
+    # 5. Model Architecture & Loss Setup (Section 12, 17, 24, 25, 27)
     model = AIRNetV3(
         in_channels=config.in_channels,
         out_channels=config.out_channels,
@@ -305,7 +284,7 @@ def main():
     else:
         scaler = torch.cuda.amp.GradScaler(enabled=is_cuda())
 
-    # Checkpoint Recovery
+    # Checkpoint Recovery (Section 44)
     state_ckpt_path = os.path.join(ckpt_dir, "training_state_latest.pth")
     last_model_path = os.path.join(ckpt_dir, "airnet_v3_last_model.pth")
     best_model_path = os.path.join(ckpt_dir, "airnet_v3_best_model.pth")
@@ -313,24 +292,19 @@ def main():
 
     start_epoch = 1
     best_val_psnr = -1.0
-    completed_epoch = 0
 
     if os.path.exists(state_ckpt_path):
         print(f"[OK] RESUMING AIR-Net v3 FROM EXISTING CHECKPOINT: {state_ckpt_path}")
         state = torch.load(state_ckpt_path, map_location=device)
         model.load_state_dict(state["model_state_dict"])
-        if "ema_state_dict" in state:
-            ema.load_state_dict(state["ema_state_dict"])
-        if "optimizer_state_dict" in state:
-            optimizer.load_state_dict(state["optimizer_state_dict"])
-        if "scheduler_state_dict" in state:
-            scheduler.load_state_dict(state["scheduler_state_dict"])
+        ema.load_state_dict(state["ema_state_dict"])
+        optimizer.load_state_dict(state["optimizer_state_dict"])
+        scheduler.load_state_dict(state["scheduler_state_dict"])
         if is_cuda() and "scaler_state_dict" in state:
             scaler.load_state_dict(state["scaler_state_dict"])
-        completed_epoch = state.get("epoch", 0)
-        start_epoch = completed_epoch + 1
+        start_epoch = state["epoch"] + 1
         best_val_psnr = state.get("best_val_psnr", -1.0)
-        print(f"Resumed at Epoch {start_epoch} (Completed Epoch: {completed_epoch}, Previous Best PSNR: {best_val_psnr:.4f} dB)")
+        print(f"Resumed at Epoch {start_epoch} (Previous Best PSNR: {best_val_psnr:.4f} dB)")
     else:
         print("[OK] STARTING AIR-Net v3 FROM SCRATCH (FRESH INITIALIZATION)")
 
@@ -353,250 +327,228 @@ def main():
             writer.writerow(["epoch", "edge_prob", "texture_prob", "noise_prob", "smooth_prob", "sparse_prob"])
 
     total_epochs = 20
+    print(f"\nBeginning AIR-Net v3 Training Loop ({start_epoch} -> {total_epochs})...\n")
 
-    # Handles Evaluation-Only Mode when training is already completed
-    if start_epoch > total_epochs:
-        print("\n==============================================================================")
-        print("EVALUATION-ONLY MODE")
-        print(f"Existing checkpoint epoch: {completed_epoch}")
-        print(f"Previous best PSNR: {best_val_psnr:.4f} dB")
-        print("No additional training performed.")
-        print("==============================================================================\n")
-    else:
-        print(f"\nBeginning AIR-Net v3 Training Loop ({start_epoch} -> {total_epochs})...\n")
-        for epoch in range(start_epoch, total_epochs + 1):
-            epoch_start = time.time()
-            model.train()
+    for epoch in range(start_epoch, total_epochs + 1):
+        epoch_start = time.time()
+        model.train()
 
-            train_loss_sum = 0.0
-            l1_sum = 0.0
-            ssim_loss_sum = 0.0
-            edge_loss_sum = 0.0
-            hf_loss_sum = 0.0
-            total_steps = 0
-            epoch_routing_probs = []
+        train_loss_sum = 0.0
+        l1_sum = 0.0
+        ssim_loss_sum = 0.0
+        edge_loss_sum = 0.0
+        hf_loss_sum = 0.0
+        total_steps = 0
+        epoch_routing_probs = []
 
-            optimizer.zero_grad()
+        optimizer.zero_grad()
 
-            for step, (lr_b, gt_b, _) in enumerate(train_loader):
+        for step, (lr_b, gt_b, _) in enumerate(train_loader):
+            lr_b = lr_b.to(device)
+            gt_b = gt_b.to(device)
+
+            if hasattr(torch.amp, 'autocast'):
+                autocast_ctx = torch.amp.autocast("cuda", enabled=is_cuda())
+            else:
+                autocast_ctx = torch.cuda.amp.autocast(enabled=is_cuda())
+
+            with autocast_ctx:
+                out = model(lr_b)
+                loss, loss_dict = criterion(out, gt_b)
+                loss = loss / config.grad_accum_steps
+
+            scaler.scale(loss).backward()
+
+            if (step + 1) % config.grad_accum_steps == 0 or (step + 1) == len(train_loader):
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+                ema.update(model)
+
+            train_loss_sum += loss.item() * config.grad_accum_steps
+            l1_sum += loss_dict["l1"]
+            ssim_loss_sum += loss_dict["ssim_loss"]
+            edge_loss_sum += loss_dict["edge"]
+            hf_loss_sum += loss_dict["hf"]
+            epoch_routing_probs.append(out["routing_probs"].detach().cpu().numpy())
+            total_steps += 1
+
+        scheduler.step()
+        current_lr = scheduler.get_last_lr()[0]
+
+        avg_train_loss = train_loss_sum / total_steps
+        avg_l1 = l1_sum / total_steps
+        avg_ssim_loss = ssim_loss_sum / total_steps
+        avg_edge_loss = edge_loss_sum / total_steps
+        avg_hf_loss = hf_loss_sum / total_steps
+
+        all_r_probs = np.concatenate(epoch_routing_probs, axis=0)
+        mean_routing = np.mean(all_r_probs, axis=0)
+
+        # Append routing distribution per epoch
+        with open(routing_dist_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([epoch] + [round(float(p), 6) for p in mean_routing])
+
+        # Validation
+        model.eval()
+        ema.apply_shadow(model)
+
+        val_loss_sum = 0.0
+        val_psnr_list = []
+        val_ssim_list = []
+        val_lpips_list = []
+        val_hf_retention_list = []
+        val_grad_pred_list = []
+        val_grad_gt_list = []
+        val_lap_pred_list = []
+        val_lap_gt_list = []
+
+        with torch.no_grad(), torch.inference_mode():
+            for lr_b, gt_b, _ in val_loader:
                 lr_b = lr_b.to(device)
                 gt_b = gt_b.to(device)
 
-                if hasattr(torch.amp, 'autocast'):
-                    autocast_ctx = torch.amp.autocast("cuda", enabled=is_cuda())
-                else:
-                    autocast_ctx = torch.cuda.amp.autocast(enabled=is_cuda())
+                out = model(lr_b)
+                v_loss, _ = criterion(out, gt_b)
+                val_loss_sum += v_loss.item()
 
-                with autocast_ctx:
-                    out = model(lr_b)
-                    loss, loss_dict = criterion(out, gt_b)
-                    loss = loss / config.grad_accum_steps
+                pred = torch.clamp(out["restored"], 0.0, 1.0)
 
-                scaler.scale(loss).backward()
+                for i in range(pred.size(0)):
+                    p_i = pred[i:i+1]
+                    g_i = gt_b[i:i+1]
 
-                if (step + 1) % config.grad_accum_steps == 0 or (step + 1) == len(train_loader):
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.max_grad_norm)
-                    scaler.step(optimizer)
-                    scaler.update()
-                    optimizer.zero_grad()
-                    ema.update(model)
+                    psnr_val = calculate_psnr(p_i, g_i, data_range=1.0)
+                    ssim_val = calculate_ssim(p_i, g_i, data_range=1.0)
+                    lpips_val = compute_lpips_safe(p_i, g_i)
 
-                train_loss_sum += loss.item() * config.grad_accum_steps
-                l1_sum += loss_dict["l1"]
-                ssim_loss_sum += loss_dict["ssim_loss"]
-                edge_loss_sum += loss_dict["edge"]
-                hf_loss_sum += loss_dict["hf"]
-                epoch_routing_probs.append(out["routing_probs"].detach().cpu().numpy())
-                total_steps += 1
+                    hf_p = compute_hf_energy(p_i)
+                    hf_g = compute_hf_energy(g_i)
+                    hf_retention = hf_p / (hf_g + 1e-8)
 
-            scheduler.step()
-            current_lr = scheduler.get_last_lr()[0]
+                    grad_p = compute_sobel_gradient_energy(p_i)
+                    grad_g = compute_sobel_gradient_energy(g_i)
 
-            avg_train_loss = train_loss_sum / total_steps
-            avg_l1 = l1_sum / total_steps
-            avg_ssim_loss = ssim_loss_sum / total_steps
-            avg_edge_loss = edge_loss_sum / total_steps
-            avg_hf_loss = hf_loss_sum / total_steps
+                    lap_p = compute_laplacian_energy(p_i)
+                    lap_g = compute_laplacian_energy(g_i)
 
-            all_r_probs = np.concatenate(epoch_routing_probs, axis=0)
-            mean_routing = np.mean(all_r_probs, axis=0)
+                    val_psnr_list.append(psnr_val)
+                    val_ssim_list.append(ssim_val)
+                    val_lpips_list.append(lpips_val)
+                    val_hf_retention_list.append(hf_retention)
+                    val_grad_pred_list.append(grad_p)
+                    val_grad_gt_list.append(grad_g)
+                    val_lap_pred_list.append(lap_p)
+                    val_lap_gt_list.append(lap_g)
 
-            # Append routing distribution per epoch
-            with open(routing_dist_path, "a", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow([epoch] + [round(float(p), 6) for p in mean_routing])
+        avg_val_loss = val_loss_sum / len(val_loader)
+        avg_val_psnr = float(np.mean(val_psnr_list))
+        avg_val_ssim = float(np.mean(val_ssim_list))
+        avg_val_lpips = float(np.mean(val_lpips_list))
+        avg_hf_retention = float(np.mean(val_hf_retention_list))
+        avg_grad_pred = float(np.mean(val_grad_pred_list))
+        avg_grad_gt = float(np.mean(val_grad_gt_list))
+        avg_lap_pred = float(np.mean(val_lap_pred_list))
+        avg_lap_gt = float(np.mean(val_lap_gt_list))
 
-            # Validation
-            model.eval()
-            ema.apply_shadow(model)
+        epoch_time = time.time() - epoch_start
 
-            val_loss_sum = 0.0
-            val_psnr_list = []
-            val_ssim_list = []
-            val_lpips_list = []
-            val_hf_retention_list = []
-            val_grad_pred_list = []
-            val_grad_gt_list = []
-            val_lap_pred_list = []
-            val_lap_gt_list = []
+        print(f"Epoch [{epoch:02d}/{total_epochs:02d}] ({epoch_time:.1f}s) | LR: {current_lr:.6f}")
+        print(f"  Train Loss: {avg_train_loss:.4f} (L1: {avg_l1:.4f}, SSIM: {avg_ssim_loss:.4f}, Edge: {avg_edge_loss:.4f}, HF: {avg_hf_loss:.4f})")
+        print(f"  Val Loss:   {avg_val_loss:.4f} | PSNR: {avg_val_psnr:.4f} dB | SSIM: {avg_val_ssim:.4f} | LPIPS: {avg_val_lpips:.4f}")
+        print(f"  Routing:    EDGE={mean_routing[0]:.2f}, TEXTURE={mean_routing[1]:.2f}, NOISE={mean_routing[2]:.2f}, SMOOTH={mean_routing[3]:.2f}, SPARSE={mean_routing[4]:.2f}")
 
-            with torch.no_grad(), torch.inference_mode():
-                for lr_b, gt_b, _ in val_loader:
-                    lr_b = lr_b.to(device)
-                    gt_b = gt_b.to(device)
+        with open(history_csv_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                epoch, round(avg_train_loss, 6), round(avg_l1, 6), round(avg_ssim_loss, 6), round(avg_edge_loss, 6), round(avg_hf_loss, 6),
+                round(avg_val_loss, 6), round(avg_val_psnr, 4), round(avg_val_ssim, 4), round(avg_val_lpips, 4),
+                round(avg_hf_retention, 6), round(avg_grad_pred, 8), round(avg_grad_gt, 8), round(avg_lap_pred, 8), round(avg_lap_gt, 8),
+                round(loss_dict["w_l1"], 4), round(loss_dict["w_ssim"], 4), round(loss_dict["w_edge"], 4), round(loss_dict["w_hf"], 4), f"{current_lr:.6e}"
+            ])
 
-                    out = model(lr_b)
-                    v_loss, _ = criterion(out, gt_b)
-                    val_loss_sum += v_loss.item()
+        is_best = avg_val_psnr > best_val_psnr
+        if is_best:
+            best_val_psnr = avg_val_psnr
+            torch.save(ema.state_dict(), ema_best_model_path)
+            torch.save(model.state_dict(), best_model_path)
+            print(f"  >>> New Best Model Saved! Val PSNR = {best_val_psnr:.4f} dB")
 
-                    pred = torch.clamp(out["restored"], 0.0, 1.0)
+        torch.save(model.state_dict(), last_model_path)
 
-                    for i in range(pred.size(0)):
-                        p_i = pred[i:i+1]
-                        g_i = gt_b[i:i+1]
+        torch.save({
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "ema_state_dict": ema.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "scaler_state_dict": scaler.state_dict() if is_cuda() else {},
+            "best_val_psnr": best_val_psnr
+        }, state_ckpt_path)
 
-                        psnr_val = calculate_psnr(p_i, g_i, data_range=1.0)
-                        ssim_val = calculate_ssim(p_i, g_i, data_range=1.0)
-                        lpips_val = compute_lpips_fast(p_i, g_i, device)
+        # 6-Panel Visual Grids at Epochs 1, 5, 10, 15, 20
+        if epoch in [1, 5, 10, 15, 20]:
+            print(f"  Generating Epoch {epoch:02d} 6-panel comparative visual grids...")
+            demo_indices = [0, 1, 2, 3, 4]
+            for idx in demo_indices:
+                lr_t, gt_t, fname = val_ds[idx]
+                bname = fname.replace(".npy", "")
+                lr_t = lr_t.unsqueeze(0).to(device)
+                gt_t = gt_t.unsqueeze(0).to(device)
 
-                        hf_p = compute_hf_energy(p_i)
-                        hf_g = compute_hf_energy(g_i)
-                        hf_retention = hf_p / (hf_g + 1e-8)
+                with torch.no_grad():
+                    v3_pred_t = torch.clamp(model(lr_t)["restored"], 0.0, 1.0)
+                    bic_t = torch.clamp(F.interpolate(lr_t.float(), size=(256, 256), mode='bicubic', align_corners=False), 0.0, 1.0)
 
-                        grad_p = compute_sobel_gradient_energy(p_i)
-                        grad_g = compute_sobel_gradient_energy(g_i)
+                lr_np = lr_t.squeeze().cpu().numpy()
+                gt_np = gt_t.squeeze().cpu().numpy()
+                bic_np = bic_t.squeeze().cpu().numpy()
+                v3_np = v3_pred_t.squeeze().cpu().numpy()
+                err_np = np.abs(v3_np - gt_np)
 
-                        lap_p = compute_laplacian_energy(p_i)
-                        lap_g = compute_laplacian_energy(g_i)
+                fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+                axes[0, 0].imshow(lr_np, cmap='gray')
+                axes[0, 0].set_title(f"NoisyLR 128x128 ({bname})", fontsize=11, fontweight='bold')
+                axes[0, 0].axis('off')
 
-                        val_psnr_list.append(psnr_val)
-                        val_ssim_list.append(ssim_val)
-                        val_lpips_list.append(lpips_val)
-                        val_hf_retention_list.append(hf_retention)
-                        val_grad_pred_list.append(grad_p)
-                        val_grad_gt_list.append(grad_g)
-                        val_lap_pred_list.append(lap_p)
-                        val_lap_gt_list.append(lap_g)
+                axes[0, 1].imshow(bic_np, cmap='gray', vmin=0, vmax=1)
+                axes[0, 1].set_title("Bicubic 256x256", fontsize=11, fontweight='bold')
+                axes[0, 1].axis('off')
 
-            avg_val_loss = val_loss_sum / len(val_loader)
-            avg_val_psnr = float(np.mean(val_psnr_list))
-            avg_val_ssim = float(np.mean(val_ssim_list))
-            avg_val_lpips = float(np.mean(val_lpips_list))
-            avg_hf_retention = float(np.mean(val_hf_retention_list))
-            avg_grad_pred = float(np.mean(val_grad_pred_list))
-            avg_grad_gt = float(np.mean(val_grad_gt_list))
-            avg_lap_pred = float(np.mean(val_lap_pred_list))
-            avg_lap_gt = float(np.mean(val_lap_gt_list))
+                axes[0, 2].imshow(v3_np, cmap='gray', vmin=0, vmax=1)
+                axes[0, 2].set_title(f"AIR-Net v3 (Epoch {epoch})", fontsize=11, fontweight='bold', color='darkgreen')
+                axes[0, 2].axis('off')
 
-            epoch_time = time.time() - epoch_start
+                axes[1, 0].imshow(gt_np, cmap='gray', vmin=0, vmax=1)
+                axes[1, 0].set_title("Ground Truth 256x256", fontsize=11, fontweight='bold')
+                axes[1, 0].axis('off')
 
-            print(f"Epoch [{epoch:02d}/{total_epochs:02d}] ({epoch_time:.1f}s) | LR: {current_lr:.6f}")
-            print(f"  Train Loss: {avg_train_loss:.4f} (L1: {avg_l1:.4f}, SSIM: {avg_ssim_loss:.4f}, Edge: {avg_edge_loss:.4f}, HF: {avg_hf_loss:.4f})")
-            print(f"  Val Loss:   {avg_val_loss:.4f} | PSNR: {avg_val_psnr:.4f} dB | SSIM: {avg_val_ssim:.4f} | LPIPS: {avg_val_lpips:.4f}")
-            print(f"  Routing:    EDGE={mean_routing[0]:.2f}, TEXTURE={mean_routing[1]:.2f}, NOISE={mean_routing[2]:.2f}, SMOOTH={mean_routing[3]:.2f}, SPARSE={mean_routing[4]:.2f}")
+                axes[1, 1].imshow(err_np, cmap='inferno')
+                axes[1, 1].set_title("Absolute Error Map", fontsize=11, fontweight='bold')
+                axes[1, 1].axis('off')
 
-            with open(history_csv_path, "a", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    epoch, round(avg_train_loss, 6), round(avg_l1, 6), round(avg_ssim_loss, 6), round(avg_edge_loss, 6), round(avg_hf_loss, 6),
-                    round(avg_val_loss, 6), round(avg_val_psnr, 4), round(avg_val_ssim, 4), round(avg_val_lpips, 4),
-                    round(avg_hf_retention, 6), round(avg_grad_pred, 8), round(avg_grad_gt, 8), round(avg_lap_pred, 8), round(avg_lap_gt, 8),
-                    round(loss_dict["w_l1"], 4), round(loss_dict["w_ssim"], 4), round(loss_dict["w_edge"], 4), round(loss_dict["w_hf"], 4), f"{current_lr:.6e}"
-                ])
+                axes[1, 2].imshow(compute_high_frequency_map(v3_pred_t).squeeze().cpu().numpy(), cmap='magma')
+                axes[1, 2].set_title("Predicted HF Detail Map", fontsize=11, fontweight='bold')
+                axes[1, 2].axis('off')
 
-            is_best = avg_val_psnr > best_val_psnr
-            if is_best:
-                best_val_psnr = avg_val_psnr
-                torch.save(ema.state_dict(), ema_best_model_path)
-                torch.save(model.state_dict(), best_model_path)
-                print(f"  >>> New Best Model Saved! Val PSNR = {best_val_psnr:.4f} dB")
+                plt.tight_layout()
+                panel_path = os.path.join(vis_dir, f"epoch_{epoch:02d}_sample_{bname}.png")
+                plt.savefig(panel_path, dpi=150)
+                plt.close(fig)
 
-            torch.save(model.state_dict(), last_model_path)
+        ema.restore(model)
 
-            torch.save({
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "ema_state_dict": ema.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict(),
-                "scaler_state_dict": scaler.state_dict() if is_cuda() else {},
-                "best_val_psnr": best_val_psnr
-            }, state_ckpt_path)
-
-            # 6-Panel Visual Grids at Epochs 1, 5, 10, 15, 20
-            if epoch in [1, 5, 10, 15, 20]:
-                print(f"  Generating Epoch {epoch:02d} 6-panel comparative visual grids...")
-                demo_indices = [0, 1, 2, 3, 4]
-                for idx in demo_indices:
-                    lr_t, gt_t, fname = val_ds[idx]
-                    bname = fname.replace(".npy", "")
-                    lr_t = lr_t.unsqueeze(0).to(device)
-                    gt_t = gt_t.unsqueeze(0).to(device)
-
-                    with torch.no_grad():
-                        v3_pred_t = torch.clamp(model(lr_t)["restored"], 0.0, 1.0)
-                        bic_t = torch.clamp(F.interpolate(lr_t.float(), size=(256, 256), mode='bicubic', align_corners=False), 0.0, 1.0)
-
-                    lr_np = lr_t.squeeze().cpu().numpy()
-                    gt_np = gt_t.squeeze().cpu().numpy()
-                    bic_np = bic_t.squeeze().cpu().numpy()
-                    v3_np = v3_pred_t.squeeze().cpu().numpy()
-                    err_np = np.abs(v3_np - gt_np)
-
-                    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-                    axes[0, 0].imshow(lr_np, cmap='gray')
-                    axes[0, 0].set_title(f"NoisyLR 128x128 ({bname})", fontsize=11, fontweight='bold')
-                    axes[0, 0].axis('off')
-
-                    axes[0, 1].imshow(bic_np, cmap='gray', vmin=0, vmax=1)
-                    axes[0, 1].set_title("Bicubic 256x256", fontsize=11, fontweight='bold')
-                    axes[0, 1].axis('off')
-
-                    axes[0, 2].imshow(v3_np, cmap='gray', vmin=0, vmax=1)
-                    axes[0, 2].set_title(f"AIR-Net v3 (Epoch {epoch})", fontsize=11, fontweight='bold', color='darkgreen')
-                    axes[0, 2].axis('off')
-
-                    axes[1, 0].imshow(gt_np, cmap='gray', vmin=0, vmax=1)
-                    axes[1, 0].set_title("Ground Truth 256x256", fontsize=11, fontweight='bold')
-                    axes[1, 0].axis('off')
-
-                    axes[1, 1].imshow(err_np, cmap='inferno')
-                    axes[1, 1].set_title("Absolute Error Map", fontsize=11, fontweight='bold')
-                    axes[1, 1].axis('off')
-
-                    axes[1, 2].imshow(compute_high_frequency_map(v3_pred_t).squeeze().cpu().numpy(), cmap='magma')
-                    axes[1, 2].set_title("Predicted HF Detail Map", fontsize=11, fontweight='bold')
-                    axes[1, 2].axis('off')
-
-                    plt.tight_layout()
-                    panel_path = os.path.join(vis_dir, f"epoch_{epoch:02d}_sample_{bname}.png")
-                    plt.savefig(panel_path, dpi=150)
-                    plt.close(fig)
-
-            ema.restore(model)
-
-    # 6. Category-Specific Performance Breakdown & Complete Validation Evaluation
-    print("--- Running Final Category-Specific Performance Evaluation (320 Validation Basis) ---")
-    load_path = ema_best_model_path if os.path.exists(ema_best_model_path) else (best_model_path if os.path.exists(best_model_path) else (last_model_path if os.path.exists(last_model_path) else state_ckpt_path))
-    if os.path.exists(load_path):
-        print(f"[OK] Loading evaluation checkpoint from: '{load_path}'")
-        ckpt_data = torch.load(load_path, map_location=device)
-        model.load_state_dict(ckpt_data.get("ema_state_dict", ckpt_data.get("model_state_dict", ckpt_data)))
+    # 6. Category-Specific Performance Breakdown (Section 63)
+    print("\n--- Running Final Category-Specific Performance Evaluation (320 Validation Basis) ---")
+    model.load_state_dict(torch.load(ema_best_model_path, map_location=device))
     model.eval()
 
     categories = ["EDGE_DOMINANT", "TEXTURE_DOMINANT", "NOISE_DOMINANT", "SMOOTH_LOW_CONTRAST", "SPARSE_FEATURE"]
     cat_metrics = {c: {"psnr": [], "ssim": [], "lpips": [], "count": 0} for c in categories}
     val_sample_rows = []
-
-    val_psnr_list = []
-    val_ssim_list = []
-    val_lpips_list = []
-    val_hf_retention_list = []
-    val_grad_pred_list = []
-    val_grad_gt_list = []
-    val_lap_pred_list = []
-    val_lap_gt_list = []
 
     with torch.no_grad(), torch.inference_mode():
         for lr_b, gt_b, fnames in val_loader:
@@ -613,26 +565,7 @@ def main():
 
                 psnr_v3 = calculate_psnr(p_i, g_i, data_range=1.0)
                 ssim_v3 = calculate_ssim(p_i, g_i, data_range=1.0)
-                lpips_v3 = compute_lpips_fast(p_i, g_i, device)
-
-                hf_p = compute_hf_energy(p_i)
-                hf_g = compute_hf_energy(g_i)
-                hf_retention = hf_p / (hf_g + 1e-8)
-
-                grad_p = compute_sobel_gradient_energy(p_i)
-                grad_g = compute_sobel_gradient_energy(g_i)
-
-                lap_p = compute_laplacian_energy(p_i)
-                lap_g = compute_laplacian_energy(g_i)
-
-                val_psnr_list.append(psnr_v3)
-                val_ssim_list.append(ssim_v3)
-                val_lpips_list.append(lpips_v3)
-                val_hf_retention_list.append(hf_retention)
-                val_grad_pred_list.append(grad_p)
-                val_grad_gt_list.append(grad_g)
-                val_lap_pred_list.append(lap_p)
-                val_lap_gt_list.append(lap_g)
+                lpips_v3 = compute_lpips_safe(p_i, g_i)
 
                 dom_cat_idx = int(np.argmax(r_probs[i]))
                 dom_cat = categories[dom_cat_idx]
@@ -655,15 +588,6 @@ def main():
                     "v3_lpips": round(lpips_v3, 4)
                 })
 
-    avg_val_psnr = float(np.mean(val_psnr_list))
-    avg_val_ssim = float(np.mean(val_ssim_list))
-    avg_val_lpips = float(np.mean(val_lpips_list))
-    avg_hf_retention = float(np.mean(val_hf_retention_list))
-    avg_grad_pred = float(np.mean(val_grad_pred_list))
-    avg_grad_gt = float(np.mean(val_grad_gt_list))
-    avg_lap_pred = float(np.mean(val_lap_pred_list))
-    avg_lap_gt = float(np.mean(val_lap_gt_list))
-
     cat_breakdown_csv = os.path.join(metrics_dir, "category_performance_breakdown.csv")
     with open(cat_breakdown_csv, "w", newline="") as f:
         writer = csv.writer(f)
@@ -681,7 +605,7 @@ def main():
         writer.writeheader()
         writer.writerows(val_sample_rows)
 
-    # 7. Master Reports & Manifests
+    # 7. Master Reports & Manifests (Section 70-72)
     manifest_path = os.path.join(v3_root, "v3_manifest.json")
     v3_manifest = {
         "project": "KLA Semiconductor Image Restoration (Project S)",
@@ -725,7 +649,7 @@ def main():
 
     index_csv_path = os.path.join(v3_root, "v3_output_index.csv")
     index_rows = [
-        {"stage": "Stage 5 (AIR-Net v3)", "artifact": "EMA Best Checkpoint", "type": "PTH", "path": os.path.relpath(load_path, v3_root), "exists": True, "description": "Best checkpoint for AIR-Net v3"},
+        {"stage": "Stage 5 (AIR-Net v3)", "artifact": "EMA Best Checkpoint", "type": "PTH", "path": os.path.relpath(ema_best_model_path, v3_root), "exists": True, "description": "EMA best checkpoint for AIR-Net v3"},
         {"stage": "Stage 5 (AIR-Net v3)", "artifact": "Training History", "type": "CSV", "path": "training_history.csv", "exists": True, "description": "Epoch-by-epoch training metrics"},
         {"stage": "Stage 5 (AIR-Net v3)", "artifact": "Routing Distribution", "type": "CSV", "path": "routing_distribution.csv", "exists": True, "description": "Routing probabilities distribution per epoch"},
         {"stage": "Stage 5 (AIR-Net v3)", "artifact": "Category Breakdown", "type": "CSV", "path": "metrics/category_performance_breakdown.csv", "exists": True, "description": "Per-category PSNR/SSIM/LPIPS breakdown"},
@@ -790,7 +714,7 @@ def main():
     with open(master_report_path, "w") as f:
         f.write(master_report_text)
 
-    # 8. Console Summary
+    # 8. Console Summary (Section 84)
     print("\n")
     print("==============================================================================")
     print("KLA PROJECT S — AIR-Net v3 FINAL RESTORATION SYSTEM")
@@ -804,7 +728,7 @@ def main():
     print(f"FINAL PSNR:\n    {avg_val_psnr:.4f} dB\n")
     print(f"FINAL SSIM:\n    {avg_val_ssim:.4f}\n")
     print(f"FINAL LPIPS:\n    {avg_val_lpips:.4f}\n")
-    print(f"CHECKPOINT:\n    {load_path}\n")
+    print(f"CHECKPOINT:\n    {ema_best_model_path}\n")
     print("STREAMLIT:\n    app.py\n")
     print("INFERENCE:\n    inference/restore_v3.py\n")
     print("==============================================================================")
