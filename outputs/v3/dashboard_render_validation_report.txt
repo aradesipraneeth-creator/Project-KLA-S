@@ -1,0 +1,72 @@
+==============================================================================
+KLA PROJECT S — AIR-NET V3 DASHBOARD & RENDER DEPLOYMENT VALIDATION REPORT
+==============================================================================
+
+1. METRIC SHAPE MISMATCH & ROOT CAUSE FIX:
+   - Root Cause: In previous dashboard code, `gt_array` was occasionally loaded
+     or un-squeezed as 128×128 or mismatched with 256×256 predictions (`bicubic_pred`
+     or `v3_pred`), triggering a `ValueError: operands could not be broadcast
+     together with shapes (256,256) (128,128)`.
+   - Resolution: Implemented centralized shape validation via `validate_image_shape()`
+     and `validate_metric_pair()`.
+   - Behavior:
+     * Input NoisyLR strictly validated as (128, 128).
+     * Ground Truth target strictly validated as (256, 256).
+     * Metrics (PSNR, SSIM, LPIPS, MSE, MAE, Edge Error) strictly verify matching
+       dimensions before execution. Any shape mismatch raises a clear error rather
+       than crashing or silently cropping/resizing.
+
+2. SOBEL EDGE-MAP IMPLEMENTATION:
+   - Implemented deterministic 2D Sobel gradient operator `compute_sobel_edge_map()`.
+   - Native resolution edge maps generated:
+     * Input Edge Map: 128×128
+     * Bicubic Edge Map: 256×256
+     * AIR-Net v3 Edge Map: 256×256
+     * Ground Truth Edge Map: 256×256
+   - Edge Error (L1 MAE between 256×256 AIR-Net v3 Edge Map and 256×256 GT Edge Map)
+     calculated only when GT exists.
+
+3. ROUTER DISTRIBUTION & BIAS DIAGNOSTIC:
+   - Automated router evaluation executed across 2,880 training samples and 320 canonical
+     validation samples.
+   - Outputs generated:
+     * `outputs/v3/indexes/router_statistics.csv`
+     * `outputs/v3/indexes/router_distribution.png`
+   - Summary: The router assigns soft probabilities across the 5 categories based strictly
+     on the 10 input characteristic features without ground-truth leakage.
+
+4. MANUAL UPLOAD BEHAVIOR & METRIC INTEGRITY:
+   - Supports PNG, JPG, JPEG, TIFF, BMP, and NPY manual uploads.
+   - Enforces 128×128 input dimension validation.
+   - When Ground Truth is not uploaded, the dashboard explicitly displays:
+     "Ground Truth unavailable — quantitative fidelity metrics cannot be calculated for this image."
+   - Fake or estimated metrics are NEVER shown.
+
+5. HARDENED LAYOUT STRUCTURE (10 SECTIONS A-J):
+   - SECTION A: Input Analysis (Native 128×128 Image + 128×128 Edge Map)
+   - SECTION B: Image Characteristics (10 Input-Only Feature Metrics)
+   - SECTION C: Soft Adaptive Router Probabilities (Bar chart + percentages)
+   - SECTION D: Why This Category? (Evidence-based feature explanation)
+   - SECTION E: Restoration Comparison Grid (NoisyLR, Bicubic, v1, v1.2, v2, v3, GT)
+   - SECTION F: Sobel Edge Analysis (Native resolution edge maps + Edge Error)
+   - SECTION G: Quantitative Fidelity Metrics (PSNR, SSIM, LPIPS, MSE, MAE, Edge Error)
+   - SECTION H: Input → Output Pipeline Flow (128×128 → 256×256 step flow)
+   - SECTION I: Metric Explanation Guide ("Why these metrics?")
+   - SECTION J: Download Restored Image (1-click 256×256 PNG download)
+
+6. RENDER DEPLOYMENT & CPU COMPATIBILITY:
+   - Created `.python-version` specifying `3.12.13`.
+   - Created `render.yaml` configuring web service with `$PORT` binding.
+   - Verified `requirements.txt` with locked dependencies.
+   - Device Safety: Implemented `DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")`
+     and `map_location=DEVICE` for seamless CPU and GPU compatibility.
+   - Path Portability: Replaced hard-coded machine paths with project-relative `Path(__file__).resolve().parent`.
+
+7. VERIFICATION & TESTING SUMMARY:
+   - Python Syntax Check: `python -m py_compile app.py` PASSED (Code 0).
+   - CPU Inference Test: PASSED.
+   - Metric Pair Validation: PASSED.
+   - Git Repository Status: Clean, ready for commit and push.
+==============================================================================
+STATUS: DASHBOARD & DEPLOYMENT HARDENING COMPLETE
+==============================================================================
