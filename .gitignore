@@ -60,3 +60,8 @@ venv.bak/
 *.swp
 *.swo
 Thumbs.db
+outputs/
+test_results.csv
+final_report.txt
+benchmark_report.txt
+best_metrics.json
