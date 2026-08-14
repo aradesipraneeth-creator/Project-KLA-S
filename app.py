@@ -28,41 +28,58 @@ config = Config(MODEL_VERSION="AIR-Net-v3")
 config.create_dirs()
 
 st.set_page_config(
-    page_title="AIR-Net v3 — Content-Adaptive Restoration System",
+    page_title="AIR-Net v3 — Semiconductor Restoration Dashboard",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# --- High-Contrast Accessible Styling (NO Black-on-Black / Low Contrast Text) ---
 st.markdown("""
     <style>
     .main {
         background-color: #0E1117;
     }
-    .metric-card {
-        background-color: #1E222A;
-        border-radius: 8px;
-        padding: 12px;
+    .stApp {
+        color: #E6EDF3;
+    }
+    .high-contrast-card {
+        background-color: #161B22;
+        color: #F0F6FC;
+        border-left: 5px solid #58A6FF;
+        padding: 18px;
+        border-radius: 6px;
+        margin-top: 10px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    }
+    .card-heading {
+        color: #58A6FF;
+        font-weight: 700;
+        font-size: 17px;
+        margin-bottom: 8px;
+    }
+    .card-text {
+        color: #E6EDF3;
+        font-size: 14px;
+        line-height: 1.5;
+    }
+    .metric-badge {
+        background-color: #21262D;
         border: 1px solid #30363D;
+        border-radius: 6px;
+        padding: 8px;
         text-align: center;
     }
     .metric-title {
         color: #8B949E;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 600;
     }
-    .metric-value {
+    .metric-num {
         color: #58A6FF;
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 700;
-    }
-    .explanation-box {
-        background-color: #161B22;
-        border-left: 4px solid #58A6FF;
-        padding: 14px;
-        border-radius: 4px;
-        margin-top: 10px;
-        margin-bottom: 15px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -99,7 +116,7 @@ def normalize_image_array(img_input) -> np.ndarray:
 
 def validate_image_shape(img: np.ndarray, expected_shape: tuple, name: str) -> np.ndarray:
     """
-    Validates that an image array matches expected_shape (e.g., (128, 128) or (256, 256)).
+    Validates that an image array matches expected_shape (e.g. (128, 128) or (256, 256)).
     """
     if img is None:
         return None
@@ -114,7 +131,7 @@ def validate_image_shape(img: np.ndarray, expected_shape: tuple, name: str) -> n
 def validate_metric_pair(pred: np.ndarray, gt: np.ndarray) -> tuple:
     """
     Verifies pred and gt have identical spatial dimensions before calculating metrics.
-    Prevents (256, 256) vs (128, 128) shape mismatch crashes.
+    Prevents shape mismatch crashes.
     """
     if pred is None or gt is None:
         raise ValueError("Ground Truth unavailable — quantitative fidelity metrics cannot be calculated for this image.")
@@ -125,10 +142,11 @@ def validate_metric_pair(pred: np.ndarray, gt: np.ndarray) -> tuple:
     return p, g
 
 
-def compute_sobel_edge_map(img_2d: np.ndarray) -> np.ndarray:
+def compute_sobel_edge_map(img_2d: np.ndarray) -> tuple:
     """
     Computes deterministic Sobel gradient magnitude map for a 2D numpy array.
     Operates at native resolution (128x128 or 256x256).
+    Returns (raw_magnitude, normalized_visual_magnitude, max_val).
     """
     t = torch.from_numpy(img_2d.astype(np.float32)).unsqueeze(0).unsqueeze(0)
     sobel_x = torch.tensor([[-1., 0., 1.], [-2., 0., 2.], [-1., 0., 1.]], dtype=torch.float32).view(1, 1, 3, 3)
@@ -136,7 +154,14 @@ def compute_sobel_edge_map(img_2d: np.ndarray) -> np.ndarray:
     gx = F.conv2d(t, sobel_x, padding=1)
     gy = F.conv2d(t, sobel_y, padding=1)
     edge_mag = torch.sqrt(gx**2 + gy**2 + 1e-8).squeeze().numpy()
-    return np.clip(edge_mag, 0.0, 1.0)
+
+    max_val = float(np.max(edge_mag))
+    if max_val == 0:
+        edge_vis = np.zeros_like(edge_mag)
+    else:
+        edge_vis = np.clip(edge_mag / max_val, 0.0, 1.0)
+
+    return edge_mag, edge_vis, max_val
 
 
 # --- Quantitative Metrics Suite ---
@@ -190,81 +215,56 @@ def resize_bicubic(lr_img: np.ndarray, target_shape=(256, 256)) -> np.ndarray:
 
 # --- Cached PyTorch Model Loader ---
 @st.cache_resource
-def load_all_models():
+def load_airnet_v3_model():
     norm_path = PROJECT_ROOT / "outputs" / "v3" / "indexes" / "index_normalization.json"
     norm_params = None
     if norm_path.exists():
         with open(norm_path, "r") as f:
             norm_params = json.load(f)
 
-    # AIR-Net v3 (Production Checkpoint)
-    v3_model = AIRNetV3(
-        in_channels=1, out_channels=1, dim=32,
-        channels=[32, 64, 128, 192], heads=[1, 2, 4, 6],
-        enc_blocks=[2, 2, 4], latent_blocks=8, dec_blocks=[4, 2, 2],
-        ffn_expansion_factor=2.66, norm_params=norm_params, use_residual_learning=True
+    model = AIRNetV3(
+        in_channels=config.in_channels,
+        out_channels=config.out_channels,
+        dim=config.dim,
+        channels=config.channels,
+        heads=config.heads,
+        enc_blocks=config.enc_blocks,
+        latent_blocks=config.latent_blocks,
+        dec_blocks=config.dec_blocks,
+        ffn_expansion_factor=config.ffn_expansion_factor,
+        norm_params=norm_params,
+        use_residual_learning=True
     ).to(DEVICE)
 
-    v3_ckpt_candidates = [
+    num_params = sum(p.numel() for p in model.parameters())
+
+    ckpt_candidates = [
         PROJECT_ROOT / "outputs" / "v3" / "checkpoints" / "airnet_v3_ema_best_model.pth",
-        PROJECT_ROOT / "outputs" / "v3" / "checkpoints" / "airnet_v3_best_model.pth"
+        PROJECT_ROOT / "outputs" / "v3" / "checkpoints" / "airnet_v3_best_model.pth",
+        PROJECT_ROOT / "outputs" / "v3" / "checkpoints" / "airnet_v3_last_model.pth",
+        PROJECT_ROOT / "outputs" / "v3" / "checkpoints" / "training_state_latest.pth"
     ]
-    v3_loaded_name = None
-    for cand in v3_ckpt_candidates:
+
+    loaded_path = None
+    loaded_size_mb = 0.0
+    for cand in ckpt_candidates:
         if cand.exists():
             try:
                 state_dict = torch.load(cand, map_location=DEVICE)
-                v3_model.load_state_dict(state_dict.get("ema_state_dict", state_dict.get("model_state_dict", state_dict)), strict=False)
-                v3_loaded_name = cand.name
+                weight_dict = state_dict.get("ema_state_dict", state_dict.get("model_state_dict", state_dict))
+                model.load_state_dict(weight_dict, strict=True)
+                loaded_path = str(cand)
+                loaded_size_mb = os.path.getsize(cand) / (1024 * 1024)
                 break
             except Exception as e:
-                print(f"Notice loading v3 checkpoint {cand}: {e}")
-    v3_model.eval()
+                print(f"Notice loading checkpoint {cand}: {e}")
 
-    # AIR-Net v2
-    v2_model = AIRNetV2(in_channels=1, out_channels=1, use_residual_learning=True).to(DEVICE)
-    v2_ckpt = PROJECT_ROOT / "outputs" / "v2" / "checkpoints" / "airnet_v2_ema_best_model.pth"
-    v2_loaded = False
-    if v2_ckpt.exists():
-        try:
-            state_dict = torch.load(v2_ckpt, map_location=DEVICE)
-            v2_model.load_state_dict(state_dict.get("ema_state_dict", state_dict), strict=False)
-            v2_loaded = True
-        except Exception:
-            pass
-    v2_model.eval()
-
-    # AIR-Net v1.2
-    v12_model = AIRNet(in_channels=1, out_channels=1).to(DEVICE)
-    v12_ckpt = PROJECT_ROOT / "outputs" / "stage3" / "checkpoints" / "airnet_v1_2_ema_best_model.pth"
-    v12_loaded = False
-    if v12_ckpt.exists():
-        try:
-            state_dict = torch.load(v12_ckpt, map_location=DEVICE)
-            v12_model.load_state_dict(state_dict.get("ema_state_dict", state_dict), strict=False)
-            v12_loaded = True
-        except Exception:
-            pass
-    v12_model.eval()
-
-    # AIR-Net v1
-    v1_model = AIRNet(in_channels=1, out_channels=1).to(DEVICE)
-    v1_ckpt = PROJECT_ROOT / "outputs" / "checkpoints" / "airnet_ema_best_model.pth"
-    v1_loaded = False
-    if v1_ckpt.exists():
-        try:
-            state_dict = torch.load(v1_ckpt, map_location=DEVICE)
-            v1_model.load_state_dict(state_dict.get("ema_state_dict", state_dict), strict=False)
-            v1_loaded = True
-        except Exception:
-            pass
-    v1_model.eval()
-
+    model.eval()
     return {
-        "v3_model": v3_model, "v3_loaded_name": v3_loaded_name,
-        "v2_model": v2_model, "v2_loaded": v2_loaded,
-        "v12_model": v12_model, "v12_loaded": v12_loaded,
-        "v1_model": v1_model, "v1_loaded": v1_loaded,
+        "model": model,
+        "num_params": num_params,
+        "loaded_path": loaded_path,
+        "loaded_size_mb": loaded_size_mb,
         "device": DEVICE
     }
 
@@ -288,58 +288,61 @@ def explain_category_routing(raw_indices: dict, dominant_cat: str, routing_probs
 
     if dominant_cat == "EDGE_DOMINANT":
         reason = (
-            f"The router assigned the highest probability ({prob_pct:.1f}%) to **EDGE_DOMINANT** "
-            f"because the input exhibits relatively strong boundary and gradient activity "
+            f"The adaptive router assigned the highest probability (**{prob_pct:.1f}%**) to **EDGE_DOMINANT** "
+            f"because the input exhibits strong boundary and structural gradient activity "
             f"(Sobel Edge Index: `{sobel:.4f}`, Gradient Energy: `{grad:.4f}`, Edge Density: `{density * 100:.1f}%`)."
         )
     elif dominant_cat == "TEXTURE_DOMINANT":
         reason = (
-            f"The router assigned the highest probability ({prob_pct:.1f}%) to **TEXTURE_DOMINANT** "
-            f"because the image contains high micro-texture variation "
+            f"The adaptive router assigned the highest probability (**{prob_pct:.1f}%**) to **TEXTURE_DOMINANT** "
+            f"because the input contains high micro-texture variation "
             f"(Texture Index: `{texture:.4f}`, High-Frequency Energy: `{hf:.4f}`, Laplacian Energy: `{lap:.4f}`)."
         )
     elif dominant_cat == "NOISE_DOMINANT":
         reason = (
-            f"The router assigned the highest probability ({prob_pct:.1f}%) to **NOISE_DOMINANT** "
-            f"because high-frequency stochastic variation dominates structural edges (Noise Index Proxy: `{noise:.4f}`)."
+            f"The adaptive router assigned the highest probability (**{prob_pct:.1f}%**) to **NOISE_DOMINANT** "
+            f"because high-frequency stochastic noise dominates structured boundaries (Noise Index Proxy: `{noise:.4f}`)."
         )
     elif dominant_cat == "SMOOTH_LOW_CONTRAST":
         reason = (
-            f"The router assigned the highest probability ({prob_pct:.1f}%) to **SMOOTH_LOW_CONTRAST** "
-            f"because intensity variations are gradual and overall contrast is low "
+            f"The adaptive router assigned the highest probability (**{prob_pct:.1f}%**) to **SMOOTH_LOW_CONTRAST** "
+            f"because intensity transitions are gradual and overall contrast is low "
             f"(Contrast Index: `{contrast:.4f}`, Edge Density: `{density * 100:.1f}%`)."
         )
     elif dominant_cat == "SPARSE_FEATURE":
         reason = (
-            f"The router assigned the highest probability ({prob_pct:.1f}%) to **SPARSE_FEATURE** "
-            f"because the image is mostly uniform with localized peak gradient spikes (Sparse Feature Index: `{sparse:.4f}`)."
+            f"The adaptive router assigned the highest probability (**{prob_pct:.1f}%**) to **SPARSE_FEATURE** "
+            f"because the image is predominantly uniform with localized peak gradient spikes (Sparse Feature Index: `{sparse:.4f}`)."
         )
     else:
-        reason = f"Routed to `{dominant_cat}` with probability `{prob_pct:.1f}%` based on input characteristic feature vector."
+        reason = f"Routed to **{dominant_cat}** with probability **{prob_pct:.1f}%** based on the 10-D characteristic vector."
 
     return reason
 
 
-# --- Streamlit Dashboard Application ---
-st.title("🔬 AIR-Net v3 Content-Adaptive Restoration System")
-st.caption("Adaptive Image Restoration Network — Input-Guided Multi-Expert Semiconductor Image Restoration")
+# --- Dashboard App Core ---
+st.title("🔬 AIR-Net v3 Content-Adaptive Restoration Viewer")
+st.caption("Adaptive Multi-Expert Semiconductor Image Restoration Network (128×128 → 256×256)")
 
 try:
-    models_dict = load_all_models()
-    device = models_dict["device"]
-    if models_dict["v3_loaded_name"]:
-        ckpt_status = f"✅ AIR-Net v3 Active: `{models_dict['v3_loaded_name']}` ({device.type.upper()})"
+    info_dict = load_airnet_v3_model()
+    model = info_dict["model"]
+    num_params = info_dict["num_params"]
+    loaded_path = info_dict["loaded_path"]
+    device_obj = info_dict["device"]
+
+    if loaded_path:
+        ckpt_status = f"✅ AIR-Net v3 Checkpoint Loaded: `{os.path.basename(loaded_path)}` ({info_dict['loaded_size_mb']:.1f} MB | {num_params:,} Params | {device_obj.type.upper()})"
     else:
-        ckpt_status = f"⚠️ Production v3 Checkpoint Not Found — Using initialized weights ({device.type.upper()})"
+        ckpt_status = f"⚠️ Checkpoint File Not Found — Operating in Architecture Demonstration Mode ({num_params:,} Params | {device_obj.type.upper()})"
 except Exception as e:
-    st.error(f"Error initializing PyTorch model: {e}")
-    models_dict = None
-    ckpt_status = f"❌ Model Initialization Error: {e}"
+    st.error(f"ERROR: AIR-Net v3 initialization failed: {e}")
+    st.stop()
 
 st.sidebar.header("📁 Control Panel & Data Source")
 st.sidebar.markdown(ckpt_status)
 
-source_mode = st.sidebar.radio("Select Input Source:", ["Validation Dataset Browser", "Manual 128x128 Image Upload"])
+source_mode = st.sidebar.radio("Select Input Source:", ["Validation Dataset Browser", "Manual 128×128 File Upload"])
 
 lr_array, gt_array = None, None
 selected_sample_name = "N/A"
@@ -353,8 +356,7 @@ if source_mode == "Validation Dataset Browser":
     if os.path.exists(train_lr_dir):
         lr_files = sorted([f for f in os.listdir(train_lr_dir) if f.endswith(".npy")])
         if lr_files:
-            # Preset selector
-            preset = st.sidebar.selectbox("Filter Presets:", ["All Validation Samples", "Sample 000001 (Deterministic Demo)", "Sample 000021", "Sample 000034", "Sample 000064", "Sample 000095"])
+            preset = st.sidebar.selectbox("Filter Presets:", ["All Validation Samples", "Sample 000001 (Demo)", "Sample 000021", "Sample 000034", "Sample 000064", "Sample 000095"])
             if preset != "All Validation Samples":
                 target_name = preset.split("(")[0].strip().replace("Sample ", "") + ".npy"
                 if target_name in lr_files:
@@ -378,9 +380,9 @@ if source_mode == "Validation Dataset Browser":
                         st.sidebar.error(str(err))
                         gt_array = None
 
-elif source_mode == "Manual 128x128 Image Upload":
-    uploaded_lr = st.sidebar.file_uploader("Upload 128x128 Semiconductor Image (.npy, .png, .jpg, .tiff, .bmp)", type=["npy", "png", "jpg", "jpeg", "bmp", "tiff"])
-    uploaded_gt = st.sidebar.file_uploader("Upload Reference Ground Truth 256x256 (Optional)", type=["npy", "png", "jpg", "jpeg"])
+elif source_mode == "Manual 128×128 File Upload":
+    uploaded_lr = st.sidebar.file_uploader("Upload 128×128 Semiconductor Image (.npy, .png, .jpg, .tiff, .bmp)", type=["npy", "png", "jpg", "jpeg", "bmp", "tiff"])
+    uploaded_gt = st.sidebar.file_uploader("Upload Reference Ground Truth 256×256 (Optional)", type=["npy", "png", "jpg", "jpeg"])
 
     if uploaded_lr:
         selected_sample_name = uploaded_lr.name
@@ -406,206 +408,188 @@ elif source_mode == "Manual 128x128 Image Upload":
             gt_array = None
 
 
-# --- Core Pipeline Execution ---
-if lr_array is not None and models_dict is not None:
+# --- Core Inference & Display Execution ---
+if lr_array is not None:
     lr_tensor = torch.from_numpy(lr_array).unsqueeze(0).unsqueeze(0).to(DEVICE)
 
-    with torch.no_grad(), torch.inference_mode():
-        v3_out = models_dict["v3_model"](lr_tensor)
-        v3_pred = torch.clamp(v3_out["restored"], 0.0, 1.0).squeeze().cpu().numpy()
-        routing_probs_arr = v3_out["routing_probs"].squeeze().cpu().numpy()
+    # AIR-Net v3 Programmatic Inference Verification
+    try:
+        with torch.no_grad(), torch.inference_mode():
+            v3_out = model(lr_tensor)
+            restored_raw = v3_out["restored"].squeeze().cpu().numpy()  # Raw Float32 for metrics
+            routing_probs_arr = v3_out["routing_probs"].squeeze().cpu().numpy()
 
-        v2_out = models_dict["v2_model"](lr_tensor)
-        v2_pred = torch.clamp(v2_out["restored"], 0.0, 1.0).squeeze().cpu().numpy()
+        r_min, r_max, r_mean = float(restored_raw.min()), float(restored_raw.max()), float(restored_raw.mean())
+        print(f"[AIR-NET V3 INFERENCE] Input: (128,128) | Output: (256,256) | Min: {r_min:.6f} | Max: {r_max:.6f} | Mean: {r_mean:.6f}")
 
-        v12_out = models_dict["v12_model"](lr_tensor)
-        v12_pred = torch.clamp(v12_out["restored"], 0.0, 1.0).squeeze().cpu().numpy()
+        if np.isnan(r_min) or np.isnan(r_max) or restored_raw.shape != (256, 256):
+            st.error("AIR-Net v3 produced an invalid output (NaN or shape mismatch).")
+            st.stop()
+    except Exception as inf_err:
+        st.error(f"ERROR: AIR-Net v3 inference failed: {inf_err}")
+        st.stop()
 
-        v1_out = models_dict["v1_model"](lr_tensor)
-        v1_pred = torch.clamp(v1_out["restored"], 0.0, 1.0).squeeze().cpu().numpy()
-
+    restored_vis = np.clip(restored_raw, 0.0, 1.0)
     bicubic_pred = resize_bicubic(lr_array, (256, 256))
 
-    # Compute Sobel edge maps for all resolution components
-    input_edge_128 = compute_sobel_edge_map(lr_array)
-    bicubic_edge_256 = compute_sobel_edge_map(bicubic_pred)
-    v3_edge_256 = compute_sobel_edge_map(v3_pred)
-    gt_edge_256 = compute_sobel_edge_map(gt_array) if gt_array is not None else None
+    # Sobel Edge Calculations
+    input_edge_raw, input_edge_vis, _ = compute_sobel_edge_map(lr_array)
+    bicubic_edge_raw, bicubic_edge_vis, _ = compute_sobel_edge_map(bicubic_pred)
+    v3_edge_raw, v3_edge_vis, _ = compute_sobel_edge_map(restored_raw)
+    gt_edge_raw, gt_edge_vis, _ = compute_sobel_edge_map(gt_array) if gt_array is not None else (None, None, 0.0)
 
-    # Compute raw input characteristic features (INPUT ONLY)
-    raw_indices = models_dict["v3_model"].indexer.compute_indices(lr_array)
+    # Compute raw 10 input characteristic features (INPUT ONLY)
+    raw_indices = model.indexer.compute_indices(lr_array)
     categories = ["EDGE_DOMINANT", "TEXTURE_DOMINANT", "NOISE_DOMINANT", "SMOOTH_LOW_CONTRAST", "SPARSE_FEATURE"]
     dominant_cat = categories[int(np.argmax(routing_probs_arr))]
     routing_dict = {cat: float(prob) for cat, prob in zip(categories, routing_probs_arr)}
 
 
     # =========================================================================
-    # SECTION A: INPUT ANALYSIS
+    # SECTION 1: DEDICATED AIR-NET V3 RESTORATION
     # =========================================================================
     st.markdown("---")
-    st.subheader(f"SECTION A: Input Analysis — {selected_sample_name}")
+    st.subheader("AIR-Net v3 Restoration")
 
-    a1, a2 = st.columns(2)
-    with a1:
-        st.markdown("**Native Input Image (128×128)**")
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(lr_array, cmap="gray")
-        ax.axis("off")
-        st.pyplot(fig)
-
-    with a2:
-        st.markdown("**Input Sobel Edge Map (128×128)**")
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(input_edge_128, cmap="magma", vmin=0, vmax=1)
-        ax.axis("off")
-        st.pyplot(fig)
+    res_col1, res_col2 = st.columns(2)
+    with res_col1:
+        st.markdown("**Input Image (128×128)**")
+        st.image(lr_array, caption=f"NoisyLR Input: {selected_sample_name} (128×128)", use_container_width=True, clamp=True)
+    with res_col2:
+        st.markdown("**AIR-Net v3 Restored (256×256)**")
+        st.image(restored_vis, caption=f"AIR-Net v3 Restored Output (256×256) | Range: [{r_min:.3f}, {r_max:.3f}]", use_container_width=True, clamp=True)
 
 
     # =========================================================================
-    # SECTION B: IMAGE CHARACTERISTICS
+    # SECTION 2: MAIN COMPARISON GRID
     # =========================================================================
     st.markdown("---")
-    st.subheader("SECTION B: 10 Input Characteristic Features (Input-Only)")
+    st.subheader("Restoration Comparison Grid")
 
-    b1_cols = st.columns(5)
-    keys_10 = list(raw_indices.keys())
-    for i, k in enumerate(keys_10[:5]):
-        b1_cols[i].metric(k.replace("_", " ").title(), f"{raw_indices[k]:.4f}")
-    b2_cols = st.columns(5)
-    for i, k in enumerate(keys_10[5:]):
-        b2_cols[i].metric(k.replace("_", " ").title(), f"{raw_indices[k]:.4f}")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown("### NoisyLR")
+        st.caption("128×128")
+        st.image(lr_array, use_container_width=True, clamp=True)
+    with c2:
+        st.markdown("### Bicubic")
+        st.caption("256×256")
+        st.image(bicubic_pred, use_container_width=True, clamp=True)
+    with c3:
+        st.markdown("### AIR-Net v3")
+        st.caption("256×256")
+        st.image(restored_vis, use_container_width=True, clamp=True)
+    with c4:
+        st.markdown("### Ground Truth")
+        st.caption("256×256")
+        if gt_array is not None:
+            st.image(gt_array, use_container_width=True, clamp=True)
+        else:
+            st.info("Ground Truth N/A")
 
 
     # =========================================================================
-    # SECTION C & D: ADAPTIVE ROUTING & EXPLAINABILITY
+    # SECTION 3: SOBEL EDGE MAP ANALYSIS
     # =========================================================================
     st.markdown("---")
-    c_col1, c_col2 = st.columns([1, 1])
+    st.subheader("Edge Map Analysis")
 
-    with c_col1:
-        st.subheader("SECTION C: Soft Adaptive Router Probabilities")
+    e1, e2, e3, e4 = st.columns(4)
+    with e1:
+        st.markdown("**Input Edge Map**")
+        st.caption("128×128 Native Resolution")
+        st.image(input_edge_vis, use_container_width=True, clamp=True)
+    with e2:
+        st.markdown("**Bicubic Edge Map**")
+        st.caption("256×256 Native Resolution")
+        st.image(bicubic_edge_vis, use_container_width=True, clamp=True)
+    with e3:
+        st.markdown("**AIR-Net v3 Edge Map**")
+        st.caption("256×256 Native Resolution")
+        st.image(v3_edge_vis, use_container_width=True, clamp=True)
+    with e4:
+        st.markdown("**Ground Truth Edge Map**")
+        st.caption("256×256 Native Resolution")
+        if gt_edge_vis is not None:
+            st.image(gt_edge_vis, use_container_width=True, clamp=True)
+        else:
+            st.info("No GT Edge Map")
+
+
+    # =========================================================================
+    # SECTION 4: INPUT -> OUTPUT TRANSFORMATION
+    # =========================================================================
+    st.markdown("---")
+    st.subheader("Input → Output Transformation")
+
+    t1, t2, t3 = st.columns([1, 1, 1])
+    with t1:
+        st.markdown("**Input Semiconductor Image**")
+        st.caption("128×128 Resolution")
+        st.image(lr_array, use_container_width=True, clamp=True)
+    with t2:
+        st.markdown("### ➔ AIR-Net v3 ➔")
+        st.caption("Shared Restormer Backbone + 5 Experts")
+        st.info(f"Category: **{dominant_cat}**\n\nParameters: **{num_params:,}**")
+    with t3:
+        st.markdown("**Restored Output Image**")
+        st.caption("256×256 Super-Resolution Target")
+        st.image(restored_vis, use_container_width=True, clamp=True)
+
+
+    # =========================================================================
+    # SECTION 5: WHY THIS CATEGORY? (HIGH-CONTRAST VISIBLE CARD)
+    # =========================================================================
+    st.markdown("---")
+    st.subheader("Why This Category?")
+
+    explanation_md = explain_category_routing(raw_indices, dominant_cat, routing_dict)
+    st.markdown(f"""
+        <div class="high-contrast-card">
+            <div class="card-heading">CLASSIFICATION ANALYSIS: {dominant_cat}</div>
+            <div class="card-text">
+                {explanation_md}
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    why_c1, why_c2 = st.columns([1, 1])
+    with why_c1:
+        st.markdown("**Soft Adaptive Routing Distribution**")
         rout_df = pd.DataFrame({
             "Category": categories,
             "Probability (%)": [round(p * 100, 2) for p in routing_probs_arr]
         })
         st.bar_chart(rout_df.set_index("Category"))
 
-    with c_col2:
-        st.subheader("SECTION D: Why This Category?")
-        st.markdown(f"**Dominant Assigned Category:** `{dominant_cat}`")
-        explanation_text = explain_category_routing(raw_indices, dominant_cat, routing_dict)
-        st.markdown(f"<div class='explanation-box'>{explanation_text}</div>", unsafe_allow_html=True)
+    with why_c2:
+        st.markdown("**10 Characteristic Input Features (Input-Only)**")
+        idx_cols1 = st.columns(5)
+        keys_10 = list(raw_indices.keys())
+        for i, k in enumerate(keys_10[:5]):
+            idx_cols1[i].metric(k.replace("_", " ").title(), f"{raw_indices[k]:.4f}")
+        idx_cols2 = st.columns(5)
+        for i, k in enumerate(keys_10[5:]):
+            idx_cols2[i].metric(k.replace("_", " ").title(), f"{raw_indices[k]:.4f}")
 
 
     # =========================================================================
-    # SECTION E: RESTORATION COMPARISON
-    # =========================================================================
-    st.markdown("---")
-    st.subheader("SECTION E: Side-by-Side Restoration Comparison")
-
-    grid_col1, grid_col2, grid_col3 = st.columns(3)
-    with grid_col1:
-        st.markdown("### 1. NoisyLR Input (128×128)")
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(lr_array, cmap="gray")
-        ax.axis("off")
-        st.pyplot(fig)
-    with grid_col2:
-        st.markdown("### 2. Bicubic Baseline (256×256)")
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(bicubic_pred, cmap="gray", vmin=0, vmax=1)
-        ax.axis("off")
-        st.pyplot(fig)
-    with grid_col3:
-        st.markdown("### 3. AIR-Net v1 (256×256)")
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(v1_pred, cmap="gray", vmin=0, vmax=1)
-        ax.axis("off")
-        st.pyplot(fig)
-
-    grid_col4, grid_col5, grid_col6 = st.columns(3)
-    with grid_col4:
-        st.markdown("### 4. AIR-Net v1.2 (256×256)")
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(v12_pred, cmap="gray", vmin=0, vmax=1)
-        ax.axis("off")
-        st.pyplot(fig)
-    with grid_col5:
-        st.markdown("### 5. AIR-Net v3 Content-Adaptive (256×256)")
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(v3_pred, cmap="gray", vmin=0, vmax=1)
-        ax.axis("off")
-        st.pyplot(fig)
-    with grid_col6:
-        st.markdown("### 6. Ground Truth Target (256×256)" if gt_array is not None else "### 6. Ground Truth Target (N/A)")
-        if gt_array is not None:
-            fig, ax = plt.subplots(figsize=(4, 4))
-            ax.imshow(gt_array, cmap="gray", vmin=0, vmax=1)
-            ax.axis("off")
-            st.pyplot(fig)
-        else:
-            st.info("Ground Truth unavailable for this manual upload.")
-
-
-    # =========================================================================
-    # SECTION F: SOBEL EDGE MAP ANALYSIS
+    # SECTION 6: QUANTITATIVE FIDELITY METRICS
     # =========================================================================
     st.markdown("---")
-    st.subheader("SECTION F: Sobel Edge Map Analysis")
-
-    e_col1, e_col2, e_col3, e_col4 = st.columns(4)
-    with e_col1:
-        st.markdown("**Input Edge Map (128×128)**")
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(input_edge_128, cmap="magma", vmin=0, vmax=1)
-        ax.axis("off")
-        st.pyplot(fig)
-    with e_col2:
-        st.markdown("**Bicubic Edge Map (256×256)**")
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(bicubic_edge_256, cmap="magma", vmin=0, vmax=1)
-        ax.axis("off")
-        st.pyplot(fig)
-    with e_col3:
-        st.markdown("**AIR-Net v3 Edge Map (256×256)**")
-        fig, ax = plt.subplots(figsize=(4, 4))
-        ax.imshow(v3_edge_256, cmap="magma", vmin=0, vmax=1)
-        ax.axis("off")
-        st.pyplot(fig)
-    with e_col4:
-        st.markdown("**Ground Truth Edge Map (256×256)**" if gt_edge_256 is not None else "**GT Edge Map (N/A)**")
-        if gt_edge_256 is not None:
-            fig, ax = plt.subplots(figsize=(4, 4))
-            ax.imshow(gt_edge_256, cmap="magma", vmin=0, vmax=1)
-            ax.axis("off")
-            st.pyplot(fig)
-        else:
-            st.info("N/A (No GT)")
-
-
-    # =========================================================================
-    # SECTION G: QUANTITATIVE FIDELITY METRICS
-    # =========================================================================
-    st.markdown("---")
-    st.subheader("SECTION G: Quantitative Fidelity Metrics")
+    st.subheader("Quantitative Fidelity Metrics")
 
     if is_validation_sample and gt_array is not None:
-        st.caption("✅ Validation Sample: Evaluated against authoritative 256×256 Ground Truth target.")
+        st.caption("Evaluated against authoritative 256×256 Ground Truth target.")
         try:
             m_bic = {"PSNR (dB)": compute_psnr(bicubic_pred, gt_array), "SSIM": compute_ssim(bicubic_pred, gt_array), "LPIPS": compute_lpips_safe(bicubic_pred, gt_array), "MSE": compute_mse(bicubic_pred, gt_array), "MAE": compute_mae(bicubic_pred, gt_array)}
-            m_v1 = {"PSNR (dB)": compute_psnr(v1_pred, gt_array), "SSIM": compute_ssim(v1_pred, gt_array), "LPIPS": compute_lpips_safe(v1_pred, gt_array), "MSE": compute_mse(v1_pred, gt_array), "MAE": compute_mae(v1_pred, gt_array)}
-            m_v12 = {"PSNR (dB)": compute_psnr(v12_pred, gt_array), "SSIM": compute_ssim(v12_pred, gt_array), "LPIPS": compute_lpips_safe(v12_pred, gt_array), "MSE": compute_mse(v12_pred, gt_array), "MAE": compute_mae(v12_pred, gt_array)}
-            m_v2 = {"PSNR (dB)": compute_psnr(v2_pred, gt_array), "SSIM": compute_ssim(v2_pred, gt_array), "LPIPS": compute_lpips_safe(v2_pred, gt_array), "MSE": compute_mse(v2_pred, gt_array), "MAE": compute_mae(v2_pred, gt_array)}
-            m_v3 = {"PSNR (dB)": compute_psnr(v3_pred, gt_array), "SSIM": compute_ssim(v3_pred, gt_array), "LPIPS": compute_lpips_safe(v3_pred, gt_array), "MSE": compute_mse(v3_pred, gt_array), "MAE": compute_mae(v3_pred, gt_array)}
+            m_v3 = {"PSNR (dB)": compute_psnr(restored_raw, gt_array), "SSIM": compute_ssim(restored_raw, gt_array), "LPIPS": compute_lpips_safe(restored_raw, gt_array), "MSE": compute_mse(restored_raw, gt_array), "MAE": compute_mae(restored_raw, gt_array)}
 
-            edge_err_v3 = float(np.mean(np.abs(v3_edge_256 - gt_edge_256)))
-            edge_err_bic = float(np.mean(np.abs(bicubic_edge_256 - gt_edge_256)))
+            edge_err_v3 = float(np.mean(np.abs(v3_edge_raw - gt_edge_raw)))
+            edge_err_bic = float(np.mean(np.abs(bicubic_edge_raw - gt_edge_raw)))
 
             metrics_df = pd.DataFrame([
                 {"Model": "Bicubic 2x", "PSNR (dB)": f"{m_bic['PSNR (dB)']:.4f}", "SSIM": f"{m_bic['SSIM']:.4f}", "LPIPS": f"{m_bic['LPIPS']:.4f}", "MSE": f"{m_bic['MSE']:.6f}", "MAE": f"{m_bic['MAE']:.6f}", "Edge Error": f"{edge_err_bic:.6f}"},
-                {"Model": "AIR-Net v1", "PSNR (dB)": f"{m_v1['PSNR (dB)']:.4f}", "SSIM": f"{m_v1['SSIM']:.4f}", "LPIPS": f"{m_v1['LPIPS']:.4f}", "MSE": f"{m_v1['MSE']:.6f}", "MAE": f"{m_v1['MAE']:.6f}", "Edge Error": "N/A"},
-                {"Model": "AIR-Net v1.2", "PSNR (dB)": f"{m_v12['PSNR (dB)']:.4f}", "SSIM": f"{m_v12['SSIM']:.4f}", "LPIPS": f"{m_v12['LPIPS']:.4f}", "MSE": f"{m_v12['MSE']:.6f}", "MAE": f"{m_v12['MAE']:.6f}", "Edge Error": "N/A"},
-                {"Model": "AIR-Net v2", "PSNR (dB)": f"{m_v2['PSNR (dB)']:.4f}", "SSIM": f"{m_v2['SSIM']:.4f}", "LPIPS": f"{m_v2['LPIPS']:.4f}", "MSE": f"{m_v2['MSE']:.6f}", "MAE": f"{m_v2['MAE']:.6f}", "Edge Error": "N/A"},
                 {"Model": "AIR-Net v3", "PSNR (dB)": f"{m_v3['PSNR (dB)']:.4f}", "SSIM": f"{m_v3['SSIM']:.4f}", "LPIPS": f"{m_v3['LPIPS']:.4f}", "MSE": f"{m_v3['MSE']:.6f}", "MAE": f"{m_v3['MAE']:.6f}", "Edge Error": f"{edge_err_v3:.6f}"}
             ])
             st.table(metrics_df)
@@ -616,52 +600,25 @@ if lr_array is not None and models_dict is not None:
 
 
     # =========================================================================
-    # SECTION H: INPUT -> OUTPUT ANALYSIS
+    # SECTION 7: DEBUG & RUNTIME INFORMATION EXPANDER
     # =========================================================================
     st.markdown("---")
-    st.subheader("SECTION H: Input → Output Restoration Pipeline Flow")
+    with st.expander("🛠️ AIR-Net v3 Debug & Runtime Information"):
+        st.json({
+            "checkpoint_path": loaded_path if loaded_path else "INITIALIZED_WEIGHTS",
+            "checkpoint_loaded": loaded_path is not None,
+            "parameter_count": f"{num_params:,}",
+            "device": str(DEVICE),
+            "input_shape": list(lr_tensor.shape),
+            "output_shape": list(v3_out["restored"].shape),
+            "output_dtype": str(restored_raw.dtype),
+            "output_min": f"{r_min:.6f}",
+            "output_max": f"{r_max:.6f}",
+            "output_mean": f"{r_mean:.6f}"
+        })
 
-    h_col1, h_col2, h_col3, h_col4 = st.columns(4)
-    with h_col1:
-        st.markdown("**Step 1: Input NoisyLR**")
-        st.image(lr_array, caption="128×128 Grayscale", use_container_width=True, clamp=True)
-    with h_col2:
-        st.markdown("**Step 2: Bicubic Upsample**")
-        st.image(bicubic_pred, caption="256×256 Upsampled", use_container_width=True, clamp=True)
-    with h_col3:
-        st.markdown("**Step 3: AIR-Net v3 Restored**")
-        st.image(v3_pred, caption="256×256 Faithful Restoration", use_container_width=True, clamp=True)
-    with h_col4:
-        st.markdown("**Step 4: Ground Truth Target**")
-        if gt_array is not None:
-            st.image(gt_array, caption="256×256 Target", use_container_width=True, clamp=True)
-        else:
-            st.info("N/A (Manual Upload)")
-
-
-    # =========================================================================
-    # SECTION I: METRIC EXPLANATION GUIDE
-    # =========================================================================
-    st.markdown("---")
-    st.subheader("SECTION I: Why These Metrics?")
-
-    st.markdown("""
-    - **PSNR (Peak Signal-to-Noise Ratio)**: Measures pixel-level reconstruction fidelity in dB. Higher is better ($\text{Target} \approx 25\text{ dB}+$).
-    - **SSIM (Structural Similarity Index)**: Measures structural, luminance, and contrast alignment in $[0, 1]$. Higher is better.
-    - **LPIPS (Learned Perceptual Image Patch Similarity)**: Measures perceptual feature difference using deep feature representations. Lower is better.
-    - **MSE / MAE**: Mean Squared Error and Mean Absolute Error between prediction and Ground Truth. Lower is better.
-    - **Sobel Edge Error**: Mean Absolute Error between predicted Sobel edge map and Ground Truth edge map at 256×256. Lower is better.
-    - **High-Frequency / Gradient / Laplacian Energy**: Quantitative descriptors of spatial details. Objective: $\text{Prediction} \approx \text{Ground Truth}$.
-    """)
-
-
-    # =========================================================================
-    # SECTION J: DOWNLOAD RESTORED IMAGE
-    # =========================================================================
-    st.markdown("---")
-    st.subheader("SECTION J: Restored Image Download")
-
-    buf_img = Image.fromarray((v3_pred * 255.0).round().astype(np.uint8))
+    # Download Button
+    buf_img = Image.fromarray((restored_vis * 255.0).round().astype(np.uint8))
     buf_path = PROJECT_ROOT / "temp_restored_v3.png"
     buf_img.save(buf_path)
     with open(buf_path, "rb") as file:
